@@ -42,11 +42,27 @@ fn main() -> anyhow::Result<()> {
         return Err(IoError::new(args.binary_path, "path does not point to a file").into());
     }
 
-    // TODO: check if wrapped bin name already exists and error if so
+    let bin_info = WrappedBinaryInfo::try_from_path(args.binary_path.clone())?;
+
+    let wrapper_already_exists = bin_info.wrapped_path.try_exists().with_context(|| {
+        IoError::new(
+            &bin_info.wrapped_path,
+            "failed to check if wrapped path already exists",
+        )
+    })?;
+
+    if wrapper_already_exists {
+        return Err(IoError::new(
+            &args.binary_path,
+            format!(
+                "wrapper already exists for this file at `{}`",
+                bin_info.unwrapped_path.display()
+            ),
+        )
+        .into());
+    }
 
     pacman_hook::create_dir()?;
-
-    let bin_info = WrappedBinaryInfo::try_from_path(args.binary_path)?;
 
     let hook_script = script::generate_hook(&bin_info, &args.args);
 
