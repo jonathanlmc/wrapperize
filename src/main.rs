@@ -20,27 +20,34 @@ struct Args {
     args: Vec<String>,
 }
 
+impl Args {
+    fn verify(&self) -> anyhow::Result<()> {
+        if self.args.is_empty() {
+            anyhow::bail!("no arguments provided to wrap");
+        }
+
+        let binary_exists = self.binary_path.try_exists().with_context(|| {
+            IoError::new(
+                &self.binary_path,
+                "failed to check if specified path exists",
+            )
+        })?;
+
+        if !binary_exists {
+            return Err(IoError::new(&self.binary_path, "path does not exist").into());
+        }
+
+        if !self.binary_path.is_file() {
+            return Err(IoError::new(&self.binary_path, "path does not point to a file").into());
+        }
+
+        Ok(())
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let args: Args = argh::from_env();
-
-    if args.args.is_empty() {
-        anyhow::bail!("no arguments provided to wrap");
-    }
-
-    let binary_exists = args.binary_path.try_exists().with_context(|| {
-        IoError::new(
-            &args.binary_path,
-            "failed to check if specified path exists",
-        )
-    })?;
-
-    if !binary_exists {
-        return Err(IoError::new(args.binary_path, "path does not exist").into());
-    }
-
-    if !args.binary_path.is_file() {
-        return Err(IoError::new(args.binary_path, "path does not point to a file").into());
-    }
+    args.verify()?;
 
     let bin_info = WrappedBinaryInfo::try_from_path(args.binary_path.clone())?;
 
