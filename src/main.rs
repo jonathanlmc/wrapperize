@@ -113,47 +113,36 @@ impl WrappedBinaryInfo {
 
 fn write_wrapper_install_script(
     bin_info: &WrappedBinaryInfo,
+    path: &Path,
     wrapper_args: &[String],
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<()> {
     let wrapper_install_script = script::generate_wrapper_install(bin_info, wrapper_args);
 
-    let wrapper_install_script_path = PathBuf::from(pacman_hook::HOOK_DIR).tap_mut(|p| {
-        p.push(format!(
-            "{wrapped_bin_name}-{program_name}-install.sh",
-            wrapped_bin_name = bin_info.wrapped_exec_name,
-            program_name = env!("CARGO_PKG_NAME")
-        ))
-    });
+    file::write_with_execute_bit(path, wrapper_install_script.as_bytes())
+        .with_context(|| IoError::new(path, "failed to create install script for pacman hook"))?;
 
-    file::write_with_execute_bit(
-        &wrapper_install_script_path,
-        wrapper_install_script.as_bytes(),
-    )
-    .with_context(|| {
-        IoError::new(
-            &wrapper_install_script_path,
-            "failed to create install script for pacman hook",
-        )
-    })?;
-
-    Ok(wrapper_install_script_path)
+    Ok(())
 }
 
 fn write_pacman_hooks(
     bin_info: &WrappedBinaryInfo,
     wrapper_install_script_path: &Path,
 ) -> anyhow::Result<()> {
-    let pacman_install_hook_path = wrapper_install_script_path.with_extension("hook");
-
-    let pacman_hook_content =
+    let install_hook_content =
         pacman_hook::generate_install_and_update(bin_info, wrapper_install_script_path);
 
-    fs::write(&pacman_install_hook_path, pacman_hook_content).with_context(|| {
-        IoError::new(
-            &pacman_install_hook_path,
-            "failed to write pacman install hook",
-        )
-    })?;
+    let install_hook_path = wrapper_install_script_path.with_extension("hook");
+
+    fs::write(&install_hook_path, install_hook_content)
+        .with_context(|| IoError::new(&install_hook_path, "failed to write pacman install hook"))?;
+
+    let remove_hook_path =
+        pacman_hook::get_hook_path(&bin_info.wrapped_exec_name, pacman_hook::Action::Removal);
+
+    let remove_hook_content = pacman_hook::generate_removal(bin_info);
+
+    fs::write(&remove_hook_path, remove_hook_content)
+        .with_context(|| IoError::new(&remove_hook_path, "failed to write pacman remove hook"))?;
 
     Ok(())
 }
@@ -182,8 +171,15 @@ fn create_wrapper_for_binary(
 
     pacman_hook::create_dir()?;
 
-    let wrapper_install_script_path = write_wrapper_install_script(bin_info, wrapper_args)?;
+    let wrapper_install_script_path = pacman_hook::get_hook_path(
+        &bin_info.wrapped_exec_name,
+        pacman_hook::Action::InstallOrUpdate,
+    )
+    .tap_mut(|p| {
+        p.set_extension("sh");
+    });
 
+    write_wrapper_install_script(bin_info, &wrapper_install_script_path, wrapper_args)?;
     write_pacman_hooks(bin_info, &wrapper_install_script_path)?;
 
     Ok(wrapper_install_script_path)
