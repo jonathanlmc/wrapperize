@@ -56,29 +56,7 @@ fn main() -> anyhow::Result<()> {
 
     let bin_info = WrappedBinaryInfo::try_from_path(args.binary_path.clone())?;
 
-    let wrapper_already_exists = bin_info.wrapped_path.try_exists().with_context(|| {
-        IoError::new(
-            &bin_info.wrapped_path,
-            "failed to check if wrapped path already exists",
-        )
-    })?;
-
-    if wrapper_already_exists {
-        return Err(IoError::new(
-            &args.binary_path,
-            format!(
-                "wrapper already exists for this file at `{}`",
-                bin_info.unwrapped_path.display()
-            ),
-        )
-        .into());
-    }
-
-    pacman_hook::create_dir()?;
-
-    let wrapper_install_script_path = write_wrapper_install_script(&bin_info, &args.args)?;
-
-    write_pacman_hooks(&bin_info, &wrapper_install_script_path)?;
+    let wrapper_install_script_path = create_wrapper_for_binary(&bin_info, &args.args)?;
 
     let status = Command::new(&wrapper_install_script_path)
         .status()
@@ -174,4 +152,35 @@ fn write_pacman_hooks(
     })?;
 
     Ok(())
+}
+
+fn create_wrapper_for_binary(
+    bin_info: &WrappedBinaryInfo,
+    wrapper_args: &[String],
+) -> anyhow::Result<PathBuf> {
+    let wrapper_already_exists = bin_info.wrapped_path.try_exists().with_context(|| {
+        IoError::new(
+            &bin_info.wrapped_path,
+            "failed to check if wrapped path already exists",
+        )
+    })?;
+
+    if wrapper_already_exists {
+        return Err(IoError::new(
+            &bin_info.wrapped_path,
+            format!(
+                "wrapper already exists for this file at `{}`",
+                bin_info.unwrapped_path.display()
+            ),
+        )
+        .into());
+    }
+
+    pacman_hook::create_dir()?;
+
+    let wrapper_install_script_path = write_wrapper_install_script(bin_info, wrapper_args)?;
+
+    write_pacman_hooks(bin_info, &wrapper_install_script_path)?;
+
+    Ok(wrapper_install_script_path)
 }
