@@ -71,9 +71,9 @@ fn main() -> anyhow::Result<()> {
 
     pacman_hook::create_dir()?;
 
-    let hook_script = script::generate_hook(&bin_info, &args.args);
+    let wrapper_install_script = script::generate_wrapper_install(&bin_info, &args.args);
 
-    let install_hook_script_path = PathBuf::from(pacman_hook::HOOK_DIR).tap_mut(|p| {
+    let wrapper_install_script_path = PathBuf::from(pacman_hook::HOOK_DIR).tap_mut(|p| {
         p.push(format!(
             "{wrapped_bin_name}-{program_name}-install.sh",
             wrapped_bin_name = bin_info.wrapped_exec_name,
@@ -81,19 +81,21 @@ fn main() -> anyhow::Result<()> {
         ))
     });
 
-    file::write_with_execute_bit(&install_hook_script_path, hook_script.as_bytes()).with_context(
-        || {
-            IoError::new(
-                &install_hook_script_path,
-                "failed to create install script for pacman hook",
-            )
-        },
-    )?;
+    file::write_with_execute_bit(
+        &wrapper_install_script_path,
+        wrapper_install_script.as_bytes(),
+    )
+    .with_context(|| {
+        IoError::new(
+            &wrapper_install_script_path,
+            "failed to create install script for pacman hook",
+        )
+    })?;
 
-    let pacman_install_hook_path = install_hook_script_path.with_extension("hook");
+    let pacman_install_hook_path = wrapper_install_script_path.with_extension("hook");
 
     let pacman_hook_content =
-        pacman_hook::generate_install_and_update(&bin_info, &install_hook_script_path);
+        pacman_hook::generate_install_and_update(&bin_info, &wrapper_install_script_path);
 
     fs::write(&pacman_install_hook_path, pacman_hook_content).with_context(|| {
         IoError::new(
@@ -102,11 +104,11 @@ fn main() -> anyhow::Result<()> {
         )
     })?;
 
-    let status = Command::new(&install_hook_script_path)
+    let status = Command::new(&wrapper_install_script_path)
         .status()
         .with_context(|| {
             IoError::new(
-                install_hook_script_path,
+                wrapper_install_script_path,
                 "failed to execute wrapper install script",
             )
         })?;

@@ -19,7 +19,7 @@ pub fn generate_binary_wrapper(unwrapped_bin_path: &Path, args: &[String]) -> St
     )
 }
 
-pub fn generate_hook(bin_info: &WrappedBinaryInfo, args: &[String]) -> String {
+pub fn generate_wrapper_install(bin_info: &WrappedBinaryInfo, args: &[String]) -> String {
     let wrapper_content = generate_binary_wrapper(&bin_info.unwrapped_path, args);
 
     formatdoc! { r#"
