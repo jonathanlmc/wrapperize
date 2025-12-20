@@ -158,9 +158,9 @@ fn create_wrapper_for_binary(
     bin_info: &WrappedBinaryInfo,
     wrapper_args: &[String],
 ) -> anyhow::Result<PathBuf> {
-    let wrapper_already_exists = bin_info.wrapped_path.try_exists().with_context(|| {
+    let wrapper_already_exists = bin_info.unwrapped_path.try_exists().with_context(|| {
         IoError::new(
-            &bin_info.wrapped_path,
+            &bin_info.unwrapped_path,
             "failed to check if wrapped path already exists",
         )
     })?;
