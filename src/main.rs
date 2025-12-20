@@ -6,7 +6,12 @@ mod script;
 use anyhow::Context;
 use argh::FromArgs;
 use error::IoError;
-use std::{fs, os::unix::process::ExitStatusExt, path::PathBuf, process::Command};
+use std::{
+    fs,
+    os::unix::process::ExitStatusExt,
+    path::{Path, PathBuf},
+    process::Command,
+};
 use tap::Tap;
 
 #[derive(FromArgs)]
@@ -73,17 +78,7 @@ fn main() -> anyhow::Result<()> {
 
     let wrapper_install_script_path = write_wrapper_install_script(&bin_info, &args.args)?;
 
-    let pacman_install_hook_path = wrapper_install_script_path.with_extension("hook");
-
-    let pacman_hook_content =
-        pacman_hook::generate_install_and_update(&bin_info, &wrapper_install_script_path);
-
-    fs::write(&pacman_install_hook_path, pacman_hook_content).with_context(|| {
-        IoError::new(
-            &pacman_install_hook_path,
-            "failed to write pacman install hook",
-        )
-    })?;
+    write_pacman_hooks(&bin_info, &wrapper_install_script_path)?;
 
     let status = Command::new(&wrapper_install_script_path)
         .status()
@@ -160,4 +155,23 @@ fn write_wrapper_install_script(
     })?;
 
     Ok(wrapper_install_script_path)
+}
+
+fn write_pacman_hooks(
+    bin_info: &WrappedBinaryInfo,
+    wrapper_install_script_path: &Path,
+) -> anyhow::Result<()> {
+    let pacman_install_hook_path = wrapper_install_script_path.with_extension("hook");
+
+    let pacman_hook_content =
+        pacman_hook::generate_install_and_update(bin_info, wrapper_install_script_path);
+
+    fs::write(&pacman_install_hook_path, pacman_hook_content).with_context(|| {
+        IoError::new(
+            &pacman_install_hook_path,
+            "failed to write pacman install hook",
+        )
+    })?;
+
+    Ok(())
 }
