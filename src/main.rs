@@ -71,26 +71,7 @@ fn main() -> anyhow::Result<()> {
 
     pacman_hook::create_dir()?;
 
-    let wrapper_install_script = script::generate_wrapper_install(&bin_info, &args.args);
-
-    let wrapper_install_script_path = PathBuf::from(pacman_hook::HOOK_DIR).tap_mut(|p| {
-        p.push(format!(
-            "{wrapped_bin_name}-{program_name}-install.sh",
-            wrapped_bin_name = bin_info.wrapped_exec_name,
-            program_name = env!("CARGO_PKG_NAME")
-        ))
-    });
-
-    file::write_with_execute_bit(
-        &wrapper_install_script_path,
-        wrapper_install_script.as_bytes(),
-    )
-    .with_context(|| {
-        IoError::new(
-            &wrapper_install_script_path,
-            "failed to create install script for pacman hook",
-        )
-    })?;
+    let wrapper_install_script_path = write_wrapper_install_script(&bin_info, &args.args)?;
 
     let pacman_install_hook_path = wrapper_install_script_path.with_extension("hook");
 
@@ -151,4 +132,32 @@ impl WrappedBinaryInfo {
             wrapped_exec_name: exec_name,
         })
     }
+}
+
+fn write_wrapper_install_script(
+    bin_info: &WrappedBinaryInfo,
+    wrapper_args: &[String],
+) -> anyhow::Result<PathBuf> {
+    let wrapper_install_script = script::generate_wrapper_install(bin_info, wrapper_args);
+
+    let wrapper_install_script_path = PathBuf::from(pacman_hook::HOOK_DIR).tap_mut(|p| {
+        p.push(format!(
+            "{wrapped_bin_name}-{program_name}-install.sh",
+            wrapped_bin_name = bin_info.wrapped_exec_name,
+            program_name = env!("CARGO_PKG_NAME")
+        ))
+    });
+
+    file::write_with_execute_bit(
+        &wrapper_install_script_path,
+        wrapper_install_script.as_bytes(),
+    )
+    .with_context(|| {
+        IoError::new(
+            &wrapper_install_script_path,
+            "failed to create install script for pacman hook",
+        )
+    })?;
+
+    Ok(wrapper_install_script_path)
 }
