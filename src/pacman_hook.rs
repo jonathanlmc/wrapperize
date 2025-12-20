@@ -1,4 +1,7 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use indoc::formatdoc;
@@ -12,14 +15,18 @@ pub fn create_dir() -> anyhow::Result<()> {
         .with_context(|| format!("failed to create pacman user hook directory at `{HOOK_DIR}`"))
 }
 
+fn trim_path_root(path: impl Into<PathBuf>) -> PathBuf {
+    let path = path.into();
+    let path_str = path.to_string_lossy();
+
+    path_str.strip_prefix('/').map(Into::into).unwrap_or(path)
+}
+
 pub fn generate_install_and_update(
     bin_info: &WrappedBinaryInfo,
     hook_script_path: &Path,
 ) -> String {
-    let wrapped_path_trimmed = bin_info.wrapped_path.to_string_lossy();
-    let wrapped_path_trimmed = wrapped_path_trimmed
-        .strip_prefix('/')
-        .unwrap_or(wrapped_path_trimmed.as_ref());
+    let wrapped_path_trimmed = trim_path_root(&bin_info.wrapped_path);
 
     formatdoc! { r#"
         [Trigger]
@@ -33,6 +40,7 @@ pub fn generate_install_and_update(
         When = PostTransaction
         Exec = {hook_script_path}
         "#,
+        wrapped_path_trimmed = wrapped_path_trimmed.display(),
         wrapped_bin_name = bin_info.wrapped_exec_name,
         hook_script_path = hook_script_path.display(),
     }
