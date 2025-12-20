@@ -46,6 +46,10 @@ impl Args {
             return Err(IoError::new(&self.binary_path, "path does not point to a file").into());
         }
 
+        if !self.binary_path.is_absolute() {
+            return Err(IoError::new(&self.binary_path, "path must be absolute").into());
+        }
+
         Ok(())
     }
 }
@@ -93,7 +97,7 @@ impl WrappedBinaryInfo {
     fn try_from_path(path: PathBuf) -> anyhow::Result<Self> {
         let exec_name = path
             .file_name()
-            .context("path does not point to a file")?
+            .context("invalid path provided")?
             .to_string_lossy()
             .into_owned();
 
