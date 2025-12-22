@@ -9,20 +9,27 @@ use tap::Tap;
 
 use crate::WrappedBinaryInfo;
 
+/// Points to the user `pacman` hook directory.
 pub const HOOK_DIR: &str = "/etc/pacman.d/hooks";
 
+/// Create the user `pacman` hook directory if it doesn't exist.
+/// Returns an error if the directory couldn't be created (likely due to permissions).
 pub fn create_dir() -> anyhow::Result<()> {
     fs::create_dir_all(HOOK_DIR)
         .with_context(|| format!("failed to create pacman user hook directory at `{HOOK_DIR}`"))
 }
 
+/// A specific action / operation for a hook's target needed to trigger the hook.
 #[derive(Copy, Clone)]
 pub enum Action {
+    /// The hook target was installed or updated.
     InstallOrUpdate,
+    /// The hook target was uninstalled / removed.
     Removal,
 }
 
 impl Action {
+    /// Returns the verb form of the action for use in paths.
     fn path_verb(self) -> &'static str {
         match self {
             Self::InstallOrUpdate => "install",
@@ -31,6 +38,7 @@ impl Action {
     }
 }
 
+/// Generate the full path for a `pacman` hook script.
 pub fn get_hook_path(binary_name: &str, action: Action) -> PathBuf {
     PathBuf::from(HOOK_DIR).tap_mut(|p| {
         p.push(format!(
@@ -41,6 +49,7 @@ pub fn get_hook_path(binary_name: &str, action: Action) -> PathBuf {
     })
 }
 
+/// Trim the leading slash from a path if one is present.
 fn trim_path_root(path: impl Into<PathBuf>) -> PathBuf {
     let path = path.into();
     let path_str = path.to_string_lossy();
@@ -48,6 +57,10 @@ fn trim_path_root(path: impl Into<PathBuf>) -> PathBuf {
     path_str.strip_prefix('/').map(Into::into).unwrap_or(path)
 }
 
+/// Generate a `pacman` hook to execute the script at the path given by
+/// `hook_script_path` when the provided wrapped binary is installed or updated.
+///
+/// Returns the generated hook string.
 pub fn generate_install_and_update(
     bin_info: &WrappedBinaryInfo,
     hook_script_path: &Path,
@@ -73,6 +86,8 @@ pub fn generate_install_and_update(
 }
 
 // TODO: add ability to remove installed hooks as well
+/// Generate a `pacman` hook to remove all wrapper traces when the specified wrapped binary is uninstalled.
+/// Returns the generated hook string.
 pub fn generate_removal(bin_info: &WrappedBinaryInfo) -> String {
     let wrapped_path_trimmed = trim_path_root(&bin_info.wrapped_path);
 
