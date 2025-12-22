@@ -50,3 +50,34 @@ pub fn generate_wrapper_install(bin_info: &WrappedBinaryInfo, args: &[String]) -
         program_name = env!("CARGO_PKG_NAME"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod generate_binary_wrapper {
+        use super::*;
+
+        #[test]
+        fn no_args() {
+            let path = Path::new("test_bin");
+            let result = generate_binary_wrapper(path, &[]);
+            assert_eq!(result, r#"exec "test_bin" "\$@""#);
+        }
+
+        #[test]
+        fn path_with_space() {
+            let path = Path::new("/usr/bin/test bin");
+            let result = generate_binary_wrapper(path, &[]);
+            assert_eq!(result, r#"exec "/usr/bin/test bin" "\$@""#);
+        }
+
+        #[test]
+        fn with_args() {
+            let path = Path::new("/usr/bin/test_bin");
+            let args = &[String::from("--arg1"), String::from("--arg2")];
+            let result = generate_binary_wrapper(path, args);
+            assert_eq!(result, r#"exec "/usr/bin/test_bin" --arg1 --arg2 "\$@""#);
+        }
+    }
+}
