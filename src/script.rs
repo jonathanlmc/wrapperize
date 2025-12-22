@@ -12,11 +12,23 @@ const SCRIPT_TEMPLATE: &str = concatdoc! {"
 pub fn generate_binary_wrapper(unwrapped_bin_path: &Path, args: &[String]) -> String {
     // TODO: add env support
     // TODO: allow arg passthrough before wrapper args
-    format!(
-        r#"exec "{unwrapped_path}" {joined_args} "\$@""#,
-        unwrapped_path = unwrapped_bin_path.display(),
-        joined_args = args.join(" ")
-    )
+    let mut wrapper = format!(
+        r#"exec "{unwrapped_path}""#,
+        unwrapped_path = unwrapped_bin_path.display()
+    );
+
+    if !args.is_empty() {
+        let joined_args = args.join(" ");
+
+        wrapper.reserve(1 + joined_args.len());
+        wrapper.push(' ');
+        wrapper.push_str(&joined_args);
+    }
+
+    // passthrough all other arguments
+    wrapper.push_str(r#" "\$@""#);
+
+    wrapper
 }
 
 pub fn generate_wrapper_install(bin_info: &WrappedBinaryInfo, args: &[String]) -> String {
