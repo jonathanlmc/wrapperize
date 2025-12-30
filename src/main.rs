@@ -16,19 +16,23 @@ use tap::Tap;
 
 #[derive(FromArgs)]
 /// Wrap an executable to always execute with additional arguments or environment variables.
-struct Args {
+struct Args<'a> {
     #[argh(positional)]
     binary_path: PathBuf,
 
     /// an additional argument to launch the binary with; can be used multiple times
     #[argh(option, short = 'a', long = "arg")]
     args: Vec<String>,
+
+    /// an environment variable in the format of `ENV=value` to launch the binary with; can be used multiple times
+    #[argh(option, short = 'e', long = "env")]
+    envs: Vec<script::EnvVar<'a>>,
 }
 
-impl Args {
+impl Args<'_> {
     fn verify(&self) -> anyhow::Result<()> {
-        if self.args.is_empty() {
-            anyhow::bail!("no arguments provided to wrap");
+        if self.args.is_empty() && self.envs.is_empty() {
+            anyhow::bail!("no arguments or environment variables provided to wrap");
         }
 
         let binary_exists = self.binary_path.try_exists().with_context(|| {
@@ -60,7 +64,12 @@ fn main() -> anyhow::Result<()> {
 
     let bin_info = WrappedBinaryInfo::try_from_path(args.binary_path.clone())?;
 
-    let wrapper_install_script_path = create_wrapper_for_binary(&bin_info, &args.args)?;
+    let wrapper_params = script::WrapperParams {
+        args: &args.args,
+        env_vars: &args.envs,
+    };
+
+    let wrapper_install_script_path = create_wrapper_for_binary(&bin_info, &wrapper_params)?;
 
     let status = Command::new(&wrapper_install_script_path)
         .status()
@@ -114,9 +123,10 @@ impl WrappedBinaryInfo {
 fn write_wrapper_install_script(
     bin_info: &WrappedBinaryInfo,
     path: &Path,
-    wrapper_args: &[String],
+    wrapper_params: &script::WrapperParams,
 ) -> anyhow::Result<()> {
-    let wrapper_install_script = script::generate_wrapper_install(bin_info, wrapper_args);
+    let wrapper_install_script = script::generate_wrapper_install(bin_info, wrapper_params)
+        .context("failed to generate wrapper install script")?;
 
     file::write_with_execute_bit(path, wrapper_install_script.as_bytes())
         .with_context(|| IoError::new(path, "failed to create install script for pacman hook"))?;
@@ -149,7 +159,7 @@ fn write_pacman_hooks(
 
 fn create_wrapper_for_binary(
     bin_info: &WrappedBinaryInfo,
-    wrapper_args: &[String],
+    wrapper_params: &script::WrapperParams,
 ) -> anyhow::Result<PathBuf> {
     let wrapper_already_exists = bin_info.unwrapped_path.try_exists().with_context(|| {
         IoError::new(
@@ -179,7 +189,7 @@ fn create_wrapper_for_binary(
         p.set_extension("sh");
     });
 
-    write_wrapper_install_script(bin_info, &wrapper_install_script_path, wrapper_args)?;
+    write_wrapper_install_script(bin_info, &wrapper_install_script_path, wrapper_params)?;
     write_pacman_hooks(bin_info, &wrapper_install_script_path)?;
 
     Ok(wrapper_install_script_path)
