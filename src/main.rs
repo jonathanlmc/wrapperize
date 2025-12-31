@@ -8,9 +8,10 @@ use argh::FromArgs;
 use error::IoError;
 use std::{
     fs,
+    io::Write,
     os::unix::process::ExitStatusExt,
     path::{Path, PathBuf},
-    process::Command,
+    process::{self, Command, Stdio},
 };
 use tap::Tap;
 
@@ -27,6 +28,10 @@ struct Args<'a> {
     /// an environment variable in the format of `ENV=value` to launch the binary with; can be used multiple times
     #[argh(option, short = 'e', long = "env")]
     envs: Vec<script::EnvVar<'a>>,
+
+    /// do not generate hooks for pacman; intended to be used for paths not managed by pacman (such as `/home`)
+    #[argh(switch, long = "nohooks")]
+    skip_pacman_hooks: bool,
 }
 
 impl Args<'_> {
@@ -69,31 +74,53 @@ fn main() -> anyhow::Result<()> {
         env_vars: &args.envs,
     };
 
-    let wrapper_install_script_path = create_wrapper_for_binary(&bin_info, &wrapper_params)?;
+    let script_status =
+        create_wrapper_for_binary(&bin_info, &wrapper_params, !args.skip_pacman_hooks)?
+            .execute()?;
 
-    let status = Command::new(&wrapper_install_script_path)
-        .status()
-        .with_context(|| {
-            IoError::new(
-                wrapper_install_script_path,
-                "failed to execute wrapper install script",
-            )
-        })?;
-
-    if status.success() {
+    if script_status.success() {
         println!(
             "wrapper successfully created for `{}`",
             bin_info.wrapped_path.display()
         );
-    } else if let Some(code) = status.code() {
+    } else if let Some(code) = script_status.code() {
         eprintln!("wrapper install script failed with code `{code}`");
-    } else if let Some(signal) = status.signal() {
+    } else if let Some(signal) = script_status.signal() {
         eprintln!("wrapper install script failed with signal `{signal}`");
     } else {
         eprintln!("wrapper install script failed");
     }
 
     Ok(())
+}
+
+fn create_wrapper_for_binary(
+    bin_info: &WrappedBinaryInfo,
+    wrapper_params: &script::WrapperParams,
+    use_pacman_hooks: bool,
+) -> anyhow::Result<WrapperInstallScript> {
+    let wrapper_already_exists = bin_info.unwrapped_path.try_exists().with_context(|| {
+        IoError::new(
+            &bin_info.unwrapped_path,
+            "failed to check if wrapped path already exists",
+        )
+    })?;
+
+    if wrapper_already_exists {
+        return Err(IoError::new(
+            &bin_info.wrapped_path,
+            format!(
+                "wrapper already exists for this file at `{}`",
+                bin_info.unwrapped_path.display()
+            ),
+        )
+        .into());
+    }
+
+    let wrapper_script = script::generate_binary_wrapper(&bin_info.unwrapped_path, wrapper_params)
+        .context("failed to generate binary wrapper")?;
+
+    WrapperInstallScript::create(bin_info, &wrapper_script, use_pacman_hooks)
 }
 
 struct WrappedBinaryInfo {
@@ -120,18 +147,82 @@ impl WrappedBinaryInfo {
     }
 }
 
-fn write_wrapper_install_script(
-    bin_info: &WrappedBinaryInfo,
-    path: &Path,
-    wrapper_params: &script::WrapperParams,
-) -> anyhow::Result<()> {
-    let wrapper_install_script = script::generate_wrapper_install(bin_info, wrapper_params)
-        .context("failed to generate wrapper install script")?;
+enum WrapperInstallScript {
+    Saved(PathBuf),
+    MemoryOnly(String),
+}
 
-    file::write_with_execute_bit(path, wrapper_install_script.as_bytes())
-        .with_context(|| IoError::new(path, "failed to create install script for pacman hook"))?;
+impl WrapperInstallScript {
+    fn create(
+        bin_info: &WrappedBinaryInfo,
+        wrapper_script: &str,
+        using_pacman_hooks: bool,
+    ) -> anyhow::Result<Self> {
+        let wrapper_install_script = script::generate_wrapper_install(bin_info, wrapper_script)
+            .context("failed to generate wrapper install script")?;
 
-    Ok(())
+        if !using_pacman_hooks {
+            return Ok(Self::MemoryOnly(wrapper_install_script));
+        }
+
+        let wrapper_install_script_path =
+            Self::write_pacman_hooks_for_script(bin_info, &wrapper_install_script)?;
+
+        Ok(WrapperInstallScript::Saved(wrapper_install_script_path))
+    }
+
+    fn write_pacman_hooks_for_script(
+        bin_info: &WrappedBinaryInfo,
+        wrapper_install_script: &str,
+    ) -> anyhow::Result<PathBuf> {
+        pacman_hook::create_dir()?;
+
+        let wrapper_install_script_path = pacman_hook::get_hook_path(
+            &bin_info.wrapped_exec_name,
+            pacman_hook::Action::InstallOrUpdate,
+        )
+        .tap_mut(|p| {
+            p.set_extension("sh");
+        });
+
+        file::write_with_execute_bit(
+            &wrapper_install_script_path,
+            wrapper_install_script.as_bytes(),
+        )
+        .with_context(|| {
+            IoError::new(
+                &wrapper_install_script_path,
+                "failed to write wrapper install script for pacman hook",
+            )
+        })?;
+
+        write_pacman_hooks(bin_info, &wrapper_install_script_path)?;
+
+        Ok(wrapper_install_script_path)
+    }
+
+    fn execute(self) -> anyhow::Result<process::ExitStatus> {
+        match self {
+            Self::MemoryOnly(script) => {
+                let mut cmd = Command::new("/usr/bin/env")
+                    .arg("bash")
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .context("failed to spawn bash to execute wrapper installer")?;
+
+                cmd.stdin
+                    .take()
+                    .context("no stdin configured for bash")?
+                    .write_all(script.as_bytes())
+                    .context("failed to pipe wrapper install script to bash")?;
+
+                cmd.wait().map_err(Into::into)
+            }
+            Self::Saved(path) => Command::new(&path)
+                .status()
+                .with_context(|| IoError::new(path, "failed to execute wrapper install script")),
+        }
+    }
 }
 
 fn write_pacman_hooks(
@@ -155,42 +246,4 @@ fn write_pacman_hooks(
         .with_context(|| IoError::new(&remove_hook_path, "failed to write pacman remove hook"))?;
 
     Ok(())
-}
-
-fn create_wrapper_for_binary(
-    bin_info: &WrappedBinaryInfo,
-    wrapper_params: &script::WrapperParams,
-) -> anyhow::Result<PathBuf> {
-    let wrapper_already_exists = bin_info.unwrapped_path.try_exists().with_context(|| {
-        IoError::new(
-            &bin_info.unwrapped_path,
-            "failed to check if wrapped path already exists",
-        )
-    })?;
-
-    if wrapper_already_exists {
-        return Err(IoError::new(
-            &bin_info.wrapped_path,
-            format!(
-                "wrapper already exists for this file at `{}`",
-                bin_info.unwrapped_path.display()
-            ),
-        )
-        .into());
-    }
-
-    pacman_hook::create_dir()?;
-
-    let wrapper_install_script_path = pacman_hook::get_hook_path(
-        &bin_info.wrapped_exec_name,
-        pacman_hook::Action::InstallOrUpdate,
-    )
-    .tap_mut(|p| {
-        p.set_extension("sh");
-    });
-
-    write_wrapper_install_script(bin_info, &wrapper_install_script_path, wrapper_params)?;
-    write_pacman_hooks(bin_info, &wrapper_install_script_path)?;
-
-    Ok(wrapper_install_script_path)
 }

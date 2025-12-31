@@ -86,7 +86,7 @@ impl<'a> WrapperParams<'a> {
     }
 }
 
-pub fn generate_binary_wrapper(
+fn generate_binary_wrapper_content(
     unwrapped_bin_path: &Path,
     params: &WrapperParams,
 ) -> anyhow::Result<String> {
@@ -120,20 +120,24 @@ pub fn generate_binary_wrapper(
     Ok(wrapper)
 }
 
-pub fn generate_wrapper_install(
-    bin_info: &WrappedBinaryInfo,
+pub fn generate_binary_wrapper(
+    unwrapped_bin_path: &Path,
     params: &WrapperParams,
 ) -> anyhow::Result<String> {
-    let wrapper_content = generate_binary_wrapper(&bin_info.unwrapped_path, params)
-        .context("failed to generate binary wrapper")?;
+    let content = generate_binary_wrapper_content(unwrapped_bin_path, params)?;
+    Ok(format!("{SCRIPT_TEMPLATE}{content}"))
+}
 
+pub fn generate_wrapper_install(
+    bin_info: &WrappedBinaryInfo,
+    wrapper_script: &str,
+) -> anyhow::Result<String> {
     Ok(formatdoc! { r#"
         {SCRIPT_TEMPLATE}
         mv "{wrapped_path}" "{unwrapped_path}"
 
         cat << _{program_name}_eof > "{wrapped_path}"
-        {SCRIPT_TEMPLATE}
-        {wrapper_content}
+        {wrapper_script}
         _{program_name}_eof
 
         chmod +x "{wrapped_path}"
@@ -194,14 +198,14 @@ mod tests {
         #[test]
         fn no_args() {
             let path = Path::new("test_bin");
-            let result = generate_binary_wrapper(path, &WrapperParams::default()).unwrap();
+            let result = generate_binary_wrapper_content(path, &WrapperParams::default()).unwrap();
             assert_eq!(result, r#"exec "test_bin" "\$@""#);
         }
 
         #[test]
         fn path_with_space() {
             let path = Path::new("/usr/bin/test bin");
-            let result = generate_binary_wrapper(path, &WrapperParams::default()).unwrap();
+            let result = generate_binary_wrapper_content(path, &WrapperParams::default()).unwrap();
             assert_eq!(result, r#"exec "/usr/bin/test bin" "\$@""#);
         }
 
@@ -209,7 +213,9 @@ mod tests {
         fn with_args() {
             let path = Path::new("/usr/bin/test_bin");
             let args = &[String::from("--arg1"), String::from("--arg2")];
-            let result = generate_binary_wrapper(path, &WrapperParams::with_args(args)).unwrap();
+            let result =
+                generate_binary_wrapper_content(path, &WrapperParams::with_args(args)).unwrap();
+
             assert_eq!(result, r#"exec "/usr/bin/test_bin" --arg1 --arg2 "\$@""#);
         }
 
@@ -219,7 +225,8 @@ mod tests {
             let env_vars = &[EnvVar::new("ENV1", "val1"), EnvVar::new("ENV2", "val2")];
 
             let result =
-                generate_binary_wrapper(path, &WrapperParams::with_env_vars(env_vars)).unwrap();
+                generate_binary_wrapper_content(path, &WrapperParams::with_env_vars(env_vars))
+                    .unwrap();
 
             assert_eq!(
                 result,
