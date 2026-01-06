@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Context;
-use indoc::formatdoc;
+use indoc::{concatdoc, formatdoc};
 use tap::Tap;
 
 use crate::{EscapedPath, WrappedBinaryInfo, error::IoError};
@@ -34,6 +34,15 @@ impl TriggerAction {
         match self {
             Self::InstallOrUpdate => "install",
             Self::Removal => "remove",
+        }
+    }
+
+    fn operations_str(self) -> &'static str {
+        match self {
+            Self::InstallOrUpdate => concatdoc! { "
+                Operation = Install
+                Operation = Upgrade" },
+            Self::Removal => "Operation = Remove",
         }
     }
 }
@@ -96,31 +105,36 @@ pub fn generate_install_and_update(
     bin_info: &WrappedBinaryInfo,
     hook_script_path: &Path,
 ) -> String {
-    let wrapped_path_trimmed = trim_path_root(&bin_info.wrapped_path.path);
-
-    formatdoc! { r#"
-        [Trigger]
-        Type = File
-        Operation = Install
-        Operation = Upgrade
-        Target = {wrapped_path_trimmed}
-
-        [Action]
-        Description = Wrapping {wrapped_bin_name} executable...
-        When = PostTransaction
-        Exec = {hook_script_path}
-        "#,
-        wrapped_path_trimmed = wrapped_path_trimmed.display(),
-        wrapped_bin_name = bin_info.wrapped_exec_name,
-        hook_script_path = hook_script_path.display(),
-    }
+    generate(
+        &bin_info.wrapped_path,
+        TriggerAction::InstallOrUpdate,
+        &format!("Wrapping {}...", bin_info.wrapped_exec_name),
+        &hook_script_path.to_string_lossy(),
+    )
 }
 
 // TODO: add ability to remove installed hooks as well
 /// Generate a `pacman` hook to remove all wrapper traces when the specified wrapped binary is uninstalled.
 /// Returns the generated hook string.
 pub fn generate_removal(bin_info: &WrappedBinaryInfo) -> String {
-    let wrapped_path_trimmed = trim_path_root(&bin_info.wrapped_path);
+    generate(
+        &bin_info.wrapped_path,
+        TriggerAction::Removal,
+        &format!(
+            "Removing traces of wrapper for {}...",
+            bin_info.wrapped_exec_name
+        ),
+        &format!("/usr/bin/rm {}", bin_info.unwrapped_path.escaped),
+    )
+}
+
+fn generate(
+    target_path: &EscapedPath,
+    trigger: TriggerAction,
+    description: &str,
+    exec_str: &str,
+) -> String {
+    let trimmed_target_path = trim_path_root(&target_path.path);
 
     formatdoc! { r#"
         [Trigger]
@@ -209,7 +223,7 @@ mod tests {
               Target = usr/bin/test_executable
 
               [Action]
-              Description = Wrapping test_executable executable...
+              Description = Wrapping test_executable...
               When = PostTransaction
               Exec = /etc/test_script.sh
               "#
@@ -235,7 +249,7 @@ mod tests {
               Target = usr/bin/wrapped_exec
 
               [Action]
-              Description = Removing traces of wrapper for wrapped_exec executable...
+              Description = Removing traces of wrapper for wrapped_exec...
               When = PostTransaction
               Exec = /usr/bin/rm /usr/bin/original_exec
               "#
