@@ -7,7 +7,7 @@ use anyhow::Context;
 use indoc::formatdoc;
 use tap::Tap;
 
-use crate::WrappedBinaryInfo;
+use crate::{WrappedBinaryInfo, error::IoError};
 
 /// Points to the user `pacman` hook directory.
 pub const HOOK_DIR: &str = "/etc/pacman.d/hooks";
@@ -19,16 +19,16 @@ pub fn create_dir() -> anyhow::Result<()> {
         .with_context(|| format!("failed to create pacman user hook directory at `{HOOK_DIR}`"))
 }
 
-/// A specific action / operation for a hook's target needed to trigger the hook.
+/// A trigger for a hook's target.
 #[derive(Copy, Clone)]
-pub enum Action {
+pub enum TriggerAction {
     /// The hook target was installed or updated.
     InstallOrUpdate,
     /// The hook target was uninstalled / removed.
     Removal,
 }
 
-impl Action {
+impl TriggerAction {
     /// Returns the verb form of the action for use in paths.
     fn path_verb(self) -> &'static str {
         match self {
@@ -38,13 +38,44 @@ impl Action {
     }
 }
 
+pub struct Hook {
+    pub trigger_action: TriggerAction,
+    pub path: PathBuf,
+}
+
+impl Hook {
+    pub fn new(binary_name: &str, trigger_action: TriggerAction) -> Self {
+        Self {
+            trigger_action,
+            path: path_for_binary(binary_name, trigger_action),
+        }
+    }
+
+    pub fn generate_and_write_to_disk(&self, bin_info: &WrappedBinaryInfo) -> anyhow::Result<()> {
+        let content = match self.trigger_action {
+            TriggerAction::InstallOrUpdate => generate_install_and_update(bin_info, &self.path),
+            TriggerAction::Removal => generate_removal(bin_info),
+        };
+
+        fs::write(&self.path, content).with_context(|| {
+            IoError::new(
+                &self.path,
+                format!(
+                    "failed to write pacman {} hook",
+                    self.trigger_action.path_verb()
+                ),
+            )
+        })
+    }
+}
+
 /// Generate the full path for a `pacman` hook script.
-pub fn get_hook_path(binary_name: &str, action: Action) -> PathBuf {
+fn path_for_binary(binary_name: &str, trigger_action: TriggerAction) -> PathBuf {
     PathBuf::from(HOOK_DIR).tap_mut(|p| {
         p.push(format!(
-            "{binary_name}-{program_name}-{action}.hook",
+            "{binary_name}-{program_name}-{trigger_action}.hook",
             program_name = env!("CARGO_PKG_NAME"),
-            action = action.path_verb(),
+            trigger_action = trigger_action.path_verb(),
         ))
     })
 }
@@ -133,23 +164,27 @@ mod tests {
     mod get_hook_path_tests {
         use super::*;
 
-        fn test_get_hook_path_helper(binary_name: &str, action: Action, expected_suffix: &str) {
+        fn test_get_hook_path_helper(
+            binary_name: &str,
+            trigger_action: TriggerAction,
+            expected_suffix: &str,
+        ) {
             let expected_program_name = env!("CARGO_PKG_NAME");
             let expected_path =
                 format!("{HOOK_DIR}/{binary_name}-{expected_program_name}-{expected_suffix}.hook");
 
-            let result = get_hook_path(binary_name, action);
+            let result = path_for_binary(binary_name, trigger_action);
             assert_eq!(result.to_string_lossy(), expected_path);
         }
 
         #[test]
         fn test_install_or_update() {
-            test_get_hook_path_helper("test_binary", Action::InstallOrUpdate, "install");
+            test_get_hook_path_helper("test_binary", TriggerAction::InstallOrUpdate, "install");
         }
 
         #[test]
         fn test_removal() {
-            test_get_hook_path_helper("test_binary", Action::Removal, "remove");
+            test_get_hook_path_helper("test_binary", TriggerAction::Removal, "remove");
         }
     }
 

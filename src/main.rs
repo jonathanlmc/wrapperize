@@ -7,10 +7,9 @@ use anyhow::Context;
 use argh::FromArgs;
 use error::IoError;
 use std::{
-    fs,
     io::Write,
     os::unix::process::ExitStatusExt,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{self, Command, Stdio},
 };
 use tap::Tap;
@@ -74,18 +73,18 @@ fn main() -> anyhow::Result<()> {
         env_vars: &args.envs,
     };
 
-    let script_status =
+    let wrapper_install_script_status =
         create_wrapper_for_binary(&bin_info, &wrapper_params, !args.skip_pacman_hooks)?
             .execute()?;
 
-    if script_status.success() {
+    if wrapper_install_script_status.success() {
         println!(
             "wrapper successfully created for `{}`",
             bin_info.wrapped_path.display()
         );
-    } else if let Some(code) = script_status.code() {
+    } else if let Some(code) = wrapper_install_script_status.code() {
         eprintln!("wrapper install script failed with code `{code}`");
-    } else if let Some(signal) = script_status.signal() {
+    } else if let Some(signal) = wrapper_install_script_status.signal() {
         eprintln!("wrapper install script failed with signal `{signal}`");
     } else {
         eprintln!("wrapper install script failed");
@@ -120,7 +119,42 @@ fn create_wrapper_for_binary(
     let wrapper_script = script::generate_binary_wrapper(&bin_info.unwrapped_path, wrapper_params)
         .context("failed to generate binary wrapper")?;
 
-    WrapperInstallScript::create(bin_info, &wrapper_script, use_pacman_hooks)
+    // the wrapper install script uses the same path / filename as the pacman install hook but with a different
+    // extension, so we can initialize the pacman install hook now to simply clone and alter its pre-computed path
+    // for the wrapper install script
+    let pacman_install_hook = pacman_hook::Hook::new(
+        &bin_info.wrapped_exec_name,
+        pacman_hook::TriggerAction::InstallOrUpdate,
+    );
+
+    // the wrapper install script only needs a path if it's going to be saved to disk,
+    // and we only need to write it to disk if we're generating pacman hooks
+    let wrapper_install_script_path = use_pacman_hooks.then(|| {
+        pacman_install_hook.path.clone().tap_mut(|p| {
+            p.set_extension("sh");
+        })
+    });
+
+    let wrapper_install_script =
+        WrapperInstallScript::create(bin_info, &wrapper_script, wrapper_install_script_path)?;
+
+    if !use_pacman_hooks {
+        return Ok(wrapper_install_script);
+    }
+
+    // since we are using pacman hooks, generate their contents and write them all to disk now
+
+    pacman_hook::create_dir()?;
+
+    pacman_install_hook.generate_and_write_to_disk(bin_info)?;
+
+    pacman_hook::Hook::new(
+        &bin_info.wrapped_exec_name,
+        pacman_hook::TriggerAction::Removal,
+    )
+    .generate_and_write_to_disk(bin_info)?;
+
+    Ok(wrapper_install_script)
 }
 
 struct WrappedBinaryInfo {
@@ -156,49 +190,25 @@ impl WrapperInstallScript {
     fn create(
         bin_info: &WrappedBinaryInfo,
         wrapper_script: &str,
-        using_pacman_hooks: bool,
+        save_to_disk: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         let wrapper_install_script = script::generate_wrapper_install(bin_info, wrapper_script)
             .context("failed to generate wrapper install script")?;
 
-        if !using_pacman_hooks {
+        let Some(path) = save_to_disk else {
             return Ok(Self::MemoryOnly(wrapper_install_script));
-        }
+        };
 
-        let wrapper_install_script_path =
-            Self::write_pacman_hooks_for_script(bin_info, &wrapper_install_script)?;
+        file::write_with_execute_bit(&path, wrapper_install_script.as_bytes()).with_context(
+            || {
+                IoError::new(
+                    &path,
+                    "failed to write wrapper install script for pacman hook",
+                )
+            },
+        )?;
 
-        Ok(WrapperInstallScript::Saved(wrapper_install_script_path))
-    }
-
-    fn write_pacman_hooks_for_script(
-        bin_info: &WrappedBinaryInfo,
-        wrapper_install_script: &str,
-    ) -> anyhow::Result<PathBuf> {
-        pacman_hook::create_dir()?;
-
-        let wrapper_install_script_path = pacman_hook::get_hook_path(
-            &bin_info.wrapped_exec_name,
-            pacman_hook::Action::InstallOrUpdate,
-        )
-        .tap_mut(|p| {
-            p.set_extension("sh");
-        });
-
-        file::write_with_execute_bit(
-            &wrapper_install_script_path,
-            wrapper_install_script.as_bytes(),
-        )
-        .with_context(|| {
-            IoError::new(
-                &wrapper_install_script_path,
-                "failed to write wrapper install script for pacman hook",
-            )
-        })?;
-
-        write_pacman_hooks(bin_info, &wrapper_install_script_path)?;
-
-        Ok(wrapper_install_script_path)
+        Ok(WrapperInstallScript::Saved(path))
     }
 
     fn execute(self) -> anyhow::Result<process::ExitStatus> {
@@ -223,27 +233,4 @@ impl WrapperInstallScript {
                 .with_context(|| IoError::new(path, "failed to execute wrapper install script")),
         }
     }
-}
-
-fn write_pacman_hooks(
-    bin_info: &WrappedBinaryInfo,
-    wrapper_install_script_path: &Path,
-) -> anyhow::Result<()> {
-    let install_hook_content =
-        pacman_hook::generate_install_and_update(bin_info, wrapper_install_script_path);
-
-    let install_hook_path = wrapper_install_script_path.with_extension("hook");
-
-    fs::write(&install_hook_path, install_hook_content)
-        .with_context(|| IoError::new(&install_hook_path, "failed to write pacman install hook"))?;
-
-    let remove_hook_path =
-        pacman_hook::get_hook_path(&bin_info.wrapped_exec_name, pacman_hook::Action::Removal);
-
-    let remove_hook_content = pacman_hook::generate_removal(bin_info);
-
-    fs::write(&remove_hook_path, remove_hook_content)
-        .with_context(|| IoError::new(&remove_hook_path, "failed to write pacman remove hook"))?;
-
-    Ok(())
 }
