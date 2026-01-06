@@ -7,7 +7,7 @@ use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
 use tap::Tap;
 
-use crate::{EscapedPath, WrappedBinaryInfo, error::IoError};
+use crate::{EscapedPath, error::IoError, wrapper};
 
 /// Points to the user `pacman` hook directory.
 pub const HOOK_DIR: &str = "/etc/pacman.d/hooks";
@@ -53,17 +53,20 @@ pub struct Hook {
 }
 
 impl Hook {
-    pub fn new(binary_name: &str, trigger_action: TriggerAction) -> Self {
+    pub fn new(target_filename: &str, trigger_action: TriggerAction) -> Self {
         Self {
             trigger_action,
-            path: path_for_binary(binary_name, trigger_action),
+            path: get_path(target_filename, trigger_action),
         }
     }
 
-    pub fn generate_and_write_to_disk(&self, bin_info: &WrappedBinaryInfo) -> anyhow::Result<()> {
+    pub fn generate_and_write_to_disk(
+        &self,
+        paths: &wrapper::GeneratedPaths,
+    ) -> anyhow::Result<()> {
         let content = match self.trigger_action {
-            TriggerAction::InstallOrUpdate => generate_install_and_update(bin_info, &self.path),
-            TriggerAction::Removal => generate_removal(bin_info),
+            TriggerAction::InstallOrUpdate => generate_install_and_update(paths, &self.path),
+            TriggerAction::Removal => generate_removal(paths),
         };
 
         fs::write(&self.path, content).with_context(|| {
@@ -79,10 +82,10 @@ impl Hook {
 }
 
 /// Generate the full path for a `pacman` hook script.
-fn path_for_binary(binary_name: &str, trigger_action: TriggerAction) -> PathBuf {
+fn get_path(target_filename: &str, trigger_action: TriggerAction) -> PathBuf {
     PathBuf::from(HOOK_DIR).tap_mut(|p| {
         p.push(format!(
-            "{binary_name}-{program_name}-{trigger_action}.hook",
+            "{target_filename}-{program_name}-{trigger_action}.hook",
             program_name = env!("CARGO_PKG_NAME"),
             trigger_action = trigger_action.path_verb(),
         ))
@@ -102,13 +105,13 @@ fn trim_path_root(path: impl Into<PathBuf>) -> PathBuf {
 ///
 /// Returns the generated hook string.
 pub fn generate_install_and_update(
-    bin_info: &WrappedBinaryInfo,
+    paths: &wrapper::GeneratedPaths,
     hook_script_path: &Path,
 ) -> String {
     generate(
-        &bin_info.wrapped_path,
+        &paths.wrapped_path,
         TriggerAction::InstallOrUpdate,
-        &format!("Wrapping {}...", bin_info.wrapped_exec_name),
+        &format!("Wrapping {}...", paths.wrapped_filename),
         &hook_script_path.to_string_lossy(),
     )
 }
@@ -116,15 +119,15 @@ pub fn generate_install_and_update(
 // TODO: add ability to remove installed hooks as well
 /// Generate a `pacman` hook to remove all wrapper traces when the specified wrapped binary is uninstalled.
 /// Returns the generated hook string.
-pub fn generate_removal(bin_info: &WrappedBinaryInfo) -> String {
+pub fn generate_removal(paths: &wrapper::GeneratedPaths) -> String {
     generate(
-        &bin_info.wrapped_path,
+        &paths.wrapped_path,
         TriggerAction::Removal,
         &format!(
             "Removing traces of wrapper for {}...",
-            bin_info.wrapped_exec_name
+            paths.wrapped_filename
         ),
-        &format!("/usr/bin/rm {}", bin_info.unwrapped_path.escaped),
+        &format!("/usr/bin/rm {}", paths.unwrapped_path.escaped),
     )
 }
 
@@ -180,15 +183,16 @@ mod tests {
         use super::*;
 
         fn test_get_hook_path_helper(
-            binary_name: &str,
+            target_filename: &str,
             trigger_action: TriggerAction,
             expected_suffix: &str,
         ) {
             let expected_program_name = env!("CARGO_PKG_NAME");
-            let expected_path =
-                format!("{HOOK_DIR}/{binary_name}-{expected_program_name}-{expected_suffix}.hook");
+            let expected_path = format!(
+                "{HOOK_DIR}/{target_filename}-{expected_program_name}-{expected_suffix}.hook"
+            );
 
-            let result = path_for_binary(binary_name, trigger_action);
+            let result = get_path(target_filename, trigger_action);
             assert_eq!(result.to_string_lossy(), expected_path);
         }
 
@@ -205,15 +209,15 @@ mod tests {
 
     #[test]
     fn test_generate_install_and_update() {
-        let bin_info = WrappedBinaryInfo {
+        let paths = wrapper::GeneratedPaths {
             wrapped_path: EscapedPath::new("/usr/bin/test_executable").unwrap(),
-            wrapped_exec_name: "test_executable".to_string(),
+            wrapped_filename: "test_executable".to_string(),
             unwrapped_path: EscapedPath::new("/usr/bin/original_executable").unwrap(),
         };
 
         let hook_script_path = PathBuf::from("/etc/test_script.sh");
 
-        let result = generate_install_and_update(&bin_info, &hook_script_path);
+        let result = generate_install_and_update(&paths, &hook_script_path);
 
         let expected = formatdoc! { r#"
               [Trigger]
@@ -234,9 +238,9 @@ mod tests {
 
     #[test]
     fn test_generate_removal() {
-        let bin_info = WrappedBinaryInfo {
+        let bin_info = wrapper::GeneratedPaths {
             wrapped_path: EscapedPath::new("/usr/bin/wrapped_exec").unwrap(),
-            wrapped_exec_name: "wrapped_exec".to_string(),
+            wrapped_filename: "wrapped_exec".to_string(),
             unwrapped_path: EscapedPath::new("/usr/bin/original_exec").unwrap(),
         };
 

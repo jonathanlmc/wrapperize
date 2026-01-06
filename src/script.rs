@@ -3,7 +3,7 @@ use std::{borrow::Cow, str::FromStr};
 use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
 
-use crate::{EscapedPath, WrappedBinaryInfo};
+use crate::{EscapedPath, wrapper};
 
 const SCRIPT_TEMPLATE: &str = concatdoc! {"
     #!/usr/bin/env bash
@@ -129,7 +129,7 @@ pub fn generate_binary_wrapper(
 }
 
 pub fn generate_wrapper_install(
-    bin_info: &WrappedBinaryInfo,
+    paths: &wrapper::GeneratedPaths,
     wrapper_script: &str,
 ) -> anyhow::Result<String> {
     Ok(formatdoc! { r#"
@@ -142,8 +142,8 @@ pub fn generate_wrapper_install(
 
         chmod +x {wrapped_path}
         "#,
-        wrapped_path = bin_info.wrapped_path.escaped,
-        unwrapped_path = bin_info.unwrapped_path.escaped,
+        wrapped_path = paths.wrapped_path.escaped,
+        unwrapped_path = paths.unwrapped_path.escaped,
         program_name = env!("CARGO_PKG_NAME"),
     })
 }
