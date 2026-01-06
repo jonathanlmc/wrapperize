@@ -9,7 +9,7 @@ use error::IoError;
 use std::{
     io::Write,
     os::unix::process::ExitStatusExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{self, Command, Stdio},
 };
 use tap::Tap;
@@ -66,7 +66,7 @@ fn main() -> anyhow::Result<()> {
     let args: Args = argh::from_env();
     args.verify()?;
 
-    let bin_info = WrappedBinaryInfo::try_from_path(args.binary_path.clone())?;
+    let bin_info = WrappedBinaryInfo::try_from_path(&args.binary_path)?;
 
     let wrapper_params = script::WrapperParams {
         args: &args.args,
@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
     if wrapper_install_script_status.success() {
         println!(
             "wrapper successfully created for `{}`",
-            bin_info.wrapped_path.display()
+            bin_info.wrapped_path.path.display()
         );
     } else if let Some(code) = wrapper_install_script_status.code() {
         eprintln!("wrapper install script failed with code `{code}`");
@@ -98,19 +98,19 @@ fn create_wrapper_for_binary(
     wrapper_params: &script::WrapperParams,
     use_pacman_hooks: bool,
 ) -> anyhow::Result<WrapperInstallScript> {
-    let wrapper_already_exists = bin_info.unwrapped_path.try_exists().with_context(|| {
+    let wrapper_already_exists = bin_info.unwrapped_path.path.try_exists().with_context(|| {
         IoError::new(
-            &bin_info.unwrapped_path,
+            &bin_info.unwrapped_path.path,
             "failed to check if wrapped path already exists",
         )
     })?;
 
     if wrapper_already_exists {
         return Err(IoError::new(
-            &bin_info.wrapped_path,
+            &bin_info.wrapped_path.path,
             format!(
                 "wrapper already exists for this file at `{}`",
-                bin_info.unwrapped_path.display()
+                bin_info.unwrapped_path.path.display()
             ),
         )
         .into());
@@ -158,25 +158,47 @@ fn create_wrapper_for_binary(
 }
 
 struct WrappedBinaryInfo {
-    unwrapped_path: PathBuf,
-    wrapped_path: PathBuf,
+    unwrapped_path: EscapedPath,
+    wrapped_path: EscapedPath,
     wrapped_exec_name: String,
 }
 
 impl WrappedBinaryInfo {
-    fn try_from_path(path: PathBuf) -> anyhow::Result<Self> {
+    fn try_from_path(path: &Path) -> anyhow::Result<Self> {
+        let wrapped_path =
+            EscapedPath::new(&path.to_string_lossy()).context("path is not valid")?;
+
         let exec_name = path
             .file_name()
             .context("invalid path provided")?
             .to_string_lossy()
             .into_owned();
 
-        let unwrapped_path = path.with_file_name(format!(".{exec_name}-unwrapped"));
+        let unwrapped_path = EscapedPath::new(
+            &path
+                .with_file_name(format!(".{exec_name}-unwrapped"))
+                .to_string_lossy(),
+        )
+        .context("generated unwrapped path is not valid")?;
 
         Ok(Self {
             unwrapped_path,
-            wrapped_path: path,
+            wrapped_path,
             wrapped_exec_name: exec_name,
+        })
+    }
+}
+
+pub struct EscapedPath {
+    pub path: PathBuf,
+    pub escaped: String,
+}
+
+impl EscapedPath {
+    pub fn new(path: &str) -> Option<Self> {
+        shlex::try_quote(path).ok().map(|escaped| Self {
+            path: path.into(),
+            escaped: escaped.into_owned(),
         })
     }
 }

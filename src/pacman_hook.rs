@@ -7,7 +7,7 @@ use anyhow::Context;
 use indoc::formatdoc;
 use tap::Tap;
 
-use crate::{WrappedBinaryInfo, error::IoError};
+use crate::{EscapedPath, WrappedBinaryInfo, error::IoError};
 
 /// Points to the user `pacman` hook directory.
 pub const HOOK_DIR: &str = "/etc/pacman.d/hooks";
@@ -96,7 +96,7 @@ pub fn generate_install_and_update(
     bin_info: &WrappedBinaryInfo,
     hook_script_path: &Path,
 ) -> String {
-    let wrapped_path_trimmed = trim_path_root(&bin_info.wrapped_path);
+    let wrapped_path_trimmed = trim_path_root(&bin_info.wrapped_path.path);
 
     formatdoc! { r#"
         [Trigger]
@@ -125,22 +125,23 @@ pub fn generate_removal(bin_info: &WrappedBinaryInfo) -> String {
     formatdoc! { r#"
         [Trigger]
         Type = File
-        Operation = Remove
-        Target = {wrapped_path_trimmed}
+        {operations}
+        Target = {trimmed_target_path}
 
         [Action]
-        Description = Removing traces of wrapper for {wrapped_bin_name} executable...
+        Description = {description}
         When = PostTransaction
-        Exec = /usr/bin/rm "{unwrapped_path}"
+        Exec = {exec_str}
         "#,
-        wrapped_path_trimmed = wrapped_path_trimmed.display(),
-        wrapped_bin_name = bin_info.wrapped_exec_name,
-        unwrapped_path = bin_info.unwrapped_path.display(),
+        operations = trigger.operations_str(),
+        trimmed_target_path = trimmed_target_path.display(),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::EscapedPath;
+
     use super::*;
 
     mod trim_path_root {
@@ -191,9 +192,9 @@ mod tests {
     #[test]
     fn test_generate_install_and_update() {
         let bin_info = WrappedBinaryInfo {
-            wrapped_path: PathBuf::from("/usr/bin/test_executable"),
+            wrapped_path: EscapedPath::new("/usr/bin/test_executable").unwrap(),
             wrapped_exec_name: "test_executable".to_string(),
-            unwrapped_path: PathBuf::from("/usr/bin/original_executable"),
+            unwrapped_path: EscapedPath::new("/usr/bin/original_executable").unwrap(),
         };
 
         let hook_script_path = PathBuf::from("/etc/test_script.sh");
@@ -220,9 +221,9 @@ mod tests {
     #[test]
     fn test_generate_removal() {
         let bin_info = WrappedBinaryInfo {
-            wrapped_path: PathBuf::from("/usr/bin/wrapped_exec"),
+            wrapped_path: EscapedPath::new("/usr/bin/wrapped_exec").unwrap(),
             wrapped_exec_name: "wrapped_exec".to_string(),
-            unwrapped_path: PathBuf::from("/usr/bin/original_exec"),
+            unwrapped_path: EscapedPath::new("/usr/bin/original_exec").unwrap(),
         };
 
         let result = generate_removal(&bin_info);
@@ -236,7 +237,7 @@ mod tests {
               [Action]
               Description = Removing traces of wrapper for wrapped_exec executable...
               When = PostTransaction
-              Exec = /usr/bin/rm "/usr/bin/original_exec"
+              Exec = /usr/bin/rm /usr/bin/original_exec
               "#
         };
 
