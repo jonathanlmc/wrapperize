@@ -1,4 +1,4 @@
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, fmt::Write, str::FromStr};
 
 use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
@@ -101,21 +101,14 @@ fn generate_binary_wrapper_content(
         .context("environment variable generation failed")?;
 
     // now execute the binary with the wrapper arguments
-    wrapper.push_str(&format!(
-        r#"exec {unwrapped_path}"#,
-        unwrapped_path = unwrapped_bin_path.escaped
-    ));
+    write!(wrapper, r#"exec {}"#, unwrapped_bin_path.escaped)?;
 
-    if !params.args.is_empty() {
-        let joined_args = params.args.join(" ");
-
-        wrapper.reserve(1 + joined_args.len());
-        wrapper.push(' ');
-        wrapper.push_str(&joined_args);
+    for arg in params.args {
+        write!(wrapper, " {}", arg)?;
     }
 
     // passthrough all other arguments
-    wrapper.push_str(r#" "\$@""#);
+    write!(wrapper, r#" "\$@""#)?;
 
     Ok(wrapper)
 }
