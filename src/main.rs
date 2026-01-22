@@ -1,3 +1,4 @@
+mod env;
 mod error;
 mod file;
 mod pacman_hook;
@@ -22,7 +23,7 @@ struct Args<'a> {
 
     /// an environment variable in the format of `ENV=value` to launch the binary with; can be used multiple times
     #[argh(option, short = 'e', long = "env")]
-    envs: Vec<script::EnvVar<'a>>,
+    envs: Vec<env::Variable<'a>>,
 
     /// do not generate hooks for pacman; intended to be used for paths not managed by pacman (such as `/home`)
     #[argh(switch, long = "nohooks")]
