@@ -1,20 +1,22 @@
 use std::path::PathBuf;
 
-use crate::str;
-
 pub struct Escaped {
     pub original: PathBuf,
     pub escaped: String,
 }
 
 impl Escaped {
-    pub const QUOTE_ESCAPE_CHAR: char = '"';
+    pub const ESCAPE_CHAR: char = '"';
+
+    // should be the escaped version of `ESCAPE_CHAR`
+    const ESCAPE_CHAR_REPLACEMENT: &str = "\\\"";
 
     pub fn new(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
 
-        let escaped =
-            str::escape_quote::<{ Self::QUOTE_ESCAPE_CHAR }>(path.to_string_lossy().as_ref());
+        let escaped = path
+            .to_string_lossy()
+            .replace(Self::ESCAPE_CHAR, Self::ESCAPE_CHAR_REPLACEMENT);
 
         Self {
             original: path,

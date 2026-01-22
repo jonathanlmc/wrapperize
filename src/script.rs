@@ -50,7 +50,7 @@ fn generate_binary_wrapper_content(
 
     // compile time sanity check: the escaped path should be escaping the same quote
     // character used in the `write!` call
-    const _: () = assert!(path::Escaped::QUOTE_ESCAPE_CHAR == '"');
+    const _: () = assert!(path::Escaped::ESCAPE_CHAR == '"');
     write!(wrapper, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
 
     for arg in params.args {
@@ -110,6 +110,13 @@ mod tests {
             let path = path::Escaped::new("/usr/bin/test bin");
             let result = generate_binary_wrapper_content(&path, &WrapperParams::default()).unwrap();
             assert_eq!(result, r#"exec "/usr/bin/test bin" "\$@""#);
+        }
+
+        #[test]
+        fn path_with_quote() {
+            let path = path::Escaped::new("/usr/bin/\"test\"");
+            let result = generate_binary_wrapper_content(&path, &WrapperParams::default()).unwrap();
+            assert_eq!(result, r#"exec "/usr/bin/\"test\"" "\$@""#);
         }
 
         #[test]

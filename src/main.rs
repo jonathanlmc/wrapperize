@@ -4,7 +4,6 @@ mod file;
 mod pacman_hook;
 mod path;
 mod script;
-mod str;
 mod wrapper;
 
 use anyhow::Context;

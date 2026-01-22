@@ -2,8 +2,6 @@ use std::{borrow::Cow, fmt, str::FromStr};
 
 use anyhow::Context;
 
-use crate::str;
-
 #[derive(Debug, PartialEq)]
 pub struct Variable<'a> {
     pub name: Cow<'a, str>,
@@ -34,7 +32,7 @@ impl<'a> Variable<'a> {
     }
 
     pub fn write_bash_line(&self, mut writer: impl fmt::Write) -> fmt::Result {
-        let escaped_value = str::escape_quote::<'"'>(&self.value);
+        let escaped_value = self.value.replace('"', "\\\"");
 
         writeln!(
             writer,
