@@ -47,6 +47,10 @@ fn generate_binary_wrapper_content(
     }
 
     // now execute the binary with the wrapper arguments
+
+    // compile time sanity check: the escaped path should be escaping the same quote
+    // character used in the `write!` call
+    const _: () = assert!(path::Escaped::QUOTE_ESCAPE_CHAR == '"');
     write!(wrapper, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
 
     for arg in params.args {
