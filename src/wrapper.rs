@@ -7,20 +7,19 @@ use std::{
 use anyhow::Context;
 use tap::Tap;
 
-use crate::{EscapedPath, error::IoError, file, pacman_hook, script};
+use crate::{error::IoError, file, pacman_hook, path, script};
 
 pub use script::WrapperParams;
 
 pub struct GeneratedPaths {
-    pub unwrapped_path: EscapedPath,
-    pub wrapped_path: EscapedPath,
+    pub unwrapped_path: path::Escaped,
+    pub wrapped_path: path::Escaped,
     pub wrapped_filename: String,
 }
 
 impl GeneratedPaths {
     pub fn try_from_path(path: &Path) -> anyhow::Result<Self> {
-        let wrapped_path =
-            EscapedPath::new(&path.to_string_lossy()).context("path is not valid")?;
+        let wrapped_path = path::Escaped::new(path);
 
         let filename = path
             .file_name()
@@ -28,12 +27,8 @@ impl GeneratedPaths {
             .to_string_lossy()
             .into_owned();
 
-        let unwrapped_path = EscapedPath::new(
-            &path
-                .with_file_name(format!(".{filename}-unwrapped"))
-                .to_string_lossy(),
-        )
-        .context("generated unwrapped path is not valid")?;
+        let unwrapped_path =
+            path::Escaped::new(path.with_file_name(format!(".{filename}-unwrapped")));
 
         Ok(Self {
             unwrapped_path,
@@ -102,19 +97,23 @@ pub fn create(
     wrapper_params: &WrapperParams,
     use_pacman_hooks: bool,
 ) -> anyhow::Result<InstallScript> {
-    let wrapper_already_exists = paths.unwrapped_path.path.try_exists().with_context(|| {
-        IoError::new(
-            &paths.unwrapped_path.path,
-            "failed to check if wrapped path already exists",
-        )
-    })?;
+    let wrapper_already_exists = paths
+        .unwrapped_path
+        .original
+        .try_exists()
+        .with_context(|| {
+            IoError::new(
+                &paths.unwrapped_path.original,
+                "failed to check if wrapped path already exists",
+            )
+        })?;
 
     if wrapper_already_exists {
         return Err(IoError::new(
-            &paths.wrapped_path.path,
+            &paths.wrapped_path.original,
             format!(
                 "wrapper already exists for this file at `{}`",
-                paths.unwrapped_path.path.display()
+                paths.unwrapped_path.original.display()
             ),
         )
         .into());

@@ -3,7 +3,7 @@ use std::{borrow::Cow, fmt::Write, str::FromStr};
 use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
 
-use crate::{EscapedPath, wrapper};
+use crate::{path, wrapper};
 
 const SCRIPT_TEMPLATE: &str = concatdoc! {"
     #!/usr/bin/env bash
@@ -87,7 +87,7 @@ impl<'a> WrapperParams<'a> {
 }
 
 fn generate_binary_wrapper_content(
-    unwrapped_bin_path: &EscapedPath,
+    unwrapped_bin_path: &path::Escaped,
     params: &WrapperParams,
 ) -> anyhow::Result<String> {
     // TODO: allow arg passthrough before wrapper args
@@ -101,7 +101,7 @@ fn generate_binary_wrapper_content(
         .context("environment variable generation failed")?;
 
     // now execute the binary with the wrapper arguments
-    write!(wrapper, r#"exec {}"#, unwrapped_bin_path.escaped)?;
+    write!(wrapper, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
 
     for arg in params.args {
         write!(wrapper, " {}", arg)?;
@@ -114,7 +114,7 @@ fn generate_binary_wrapper_content(
 }
 
 pub fn generate_binary_wrapper(
-    unwrapped_bin_path: &EscapedPath,
+    unwrapped_bin_path: &path::Escaped,
     params: &WrapperParams,
 ) -> anyhow::Result<String> {
     let content = generate_binary_wrapper_content(unwrapped_bin_path, params)?;
@@ -127,13 +127,13 @@ pub fn generate_wrapper_install(
 ) -> anyhow::Result<String> {
     Ok(formatdoc! { r#"
         {SCRIPT_TEMPLATE}
-        mv {wrapped_path} {unwrapped_path}
+        mv "{wrapped_path}" "{unwrapped_path}"
 
-        cat << _{program_name}_eof > {wrapped_path}
+        cat << _{program_name}_eof > "{wrapped_path}"
         {wrapper_script}
         _{program_name}_eof
 
-        chmod +x {wrapped_path}
+        chmod +x "{wrapped_path}"
         "#,
         wrapped_path = paths.wrapped_path.escaped,
         unwrapped_path = paths.unwrapped_path.escaped,
@@ -190,31 +190,31 @@ mod tests {
 
         #[test]
         fn no_args() {
-            let path = EscapedPath::new("test_bin").unwrap();
+            let path = path::Escaped::new("test_bin");
             let result = generate_binary_wrapper_content(&path, &WrapperParams::default()).unwrap();
-            assert_eq!(result, r#"exec test_bin "\$@""#);
+            assert_eq!(result, r#"exec "test_bin" "\$@""#);
         }
 
         #[test]
         fn path_with_space() {
-            let path = EscapedPath::new("/usr/bin/test bin").unwrap();
+            let path = path::Escaped::new("/usr/bin/test bin");
             let result = generate_binary_wrapper_content(&path, &WrapperParams::default()).unwrap();
-            assert_eq!(result, r#"exec '/usr/bin/test bin' "\$@""#);
+            assert_eq!(result, r#"exec "/usr/bin/test bin" "\$@""#);
         }
 
         #[test]
         fn with_args() {
-            let path = EscapedPath::new("/usr/bin/test_bin").unwrap();
+            let path = path::Escaped::new("/usr/bin/test_bin");
             let args = &[String::from("--arg1"), String::from("--arg2")];
             let result =
                 generate_binary_wrapper_content(&path, &WrapperParams::with_args(args)).unwrap();
 
-            assert_eq!(result, r#"exec /usr/bin/test_bin --arg1 --arg2 "\$@""#);
+            assert_eq!(result, r#"exec "/usr/bin/test_bin" --arg1 --arg2 "\$@""#);
         }
 
         #[test]
         fn with_env_vars() {
-            let path = EscapedPath::new("/usr/bin/test_bin").unwrap();
+            let path = path::Escaped::new("/usr/bin/test_bin");
             let env_vars = &[EnvVar::new("ENV1", "val1"), EnvVar::new("ENV2", "val2")];
 
             let result =
@@ -226,7 +226,7 @@ mod tests {
                 formatdoc! { r#"
                     export ENV1=val1
                     export ENV2=val2
-                    exec /usr/bin/test_bin "\$@""#
+                    exec "/usr/bin/test_bin" "\$@""#
                 }
             );
         }

@@ -7,7 +7,7 @@ use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
 use tap::Tap;
 
-use crate::{EscapedPath, error::IoError, wrapper};
+use crate::{error::IoError, path, wrapper};
 
 /// Points to the user `pacman` hook directory.
 pub const HOOK_DIR: &str = "/etc/pacman.d/hooks";
@@ -132,12 +132,12 @@ pub fn generate_removal(paths: &wrapper::GeneratedPaths) -> String {
 }
 
 fn generate(
-    target_path: &EscapedPath,
+    target_path: &path::Escaped,
     trigger: TriggerAction,
     description: &str,
     exec_str: &str,
 ) -> String {
-    let trimmed_target_path = trim_path_root(&target_path.path);
+    let trimmed_target_path = trim_path_root(&target_path.original);
 
     formatdoc! { r#"
         [Trigger]
@@ -157,8 +157,6 @@ fn generate(
 
 #[cfg(test)]
 mod tests {
-    use crate::EscapedPath;
-
     use super::*;
 
     mod trim_path_root {
@@ -210,9 +208,9 @@ mod tests {
     #[test]
     fn test_generate_install_and_update() {
         let paths = wrapper::GeneratedPaths {
-            wrapped_path: EscapedPath::new("/usr/bin/test_executable").unwrap(),
+            wrapped_path: path::Escaped::new("/usr/bin/test_executable"),
             wrapped_filename: "test_executable".to_string(),
-            unwrapped_path: EscapedPath::new("/usr/bin/original_executable").unwrap(),
+            unwrapped_path: path::Escaped::new("/usr/bin/original_executable"),
         };
 
         let hook_script_path = PathBuf::from("/etc/test_script.sh");
@@ -239,9 +237,9 @@ mod tests {
     #[test]
     fn test_generate_removal() {
         let bin_info = wrapper::GeneratedPaths {
-            wrapped_path: EscapedPath::new("/usr/bin/wrapped_exec").unwrap(),
+            wrapped_path: path::Escaped::new("/usr/bin/wrapped_exec"),
             wrapped_filename: "wrapped_exec".to_string(),
-            unwrapped_path: EscapedPath::new("/usr/bin/original_exec").unwrap(),
+            unwrapped_path: path::Escaped::new("/usr/bin/original_exec"),
         };
 
         let result = generate_removal(&bin_info);

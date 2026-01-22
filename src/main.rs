@@ -1,6 +1,7 @@
 mod error;
 mod file;
 mod pacman_hook;
+mod path;
 mod script;
 mod wrapper;
 
@@ -74,7 +75,7 @@ fn main() -> anyhow::Result<()> {
     if wrapper_install_script_status.success() {
         println!(
             "wrapper successfully created for `{}`",
-            wrapper_paths.wrapped_path.path.display()
+            wrapper_paths.wrapped_path.original.display()
         );
     } else if let Some(code) = wrapper_install_script_status.code() {
         eprintln!("wrapper install script failed with code `{code}`");
@@ -85,18 +86,4 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-pub struct EscapedPath {
-    pub path: PathBuf,
-    pub escaped: String,
-}
-
-impl EscapedPath {
-    pub fn new(path: &str) -> Option<Self> {
-        shlex::try_quote(path).ok().map(|escaped| Self {
-            path: path.into(),
-            escaped: escaped.into_owned(),
-        })
-    }
 }
