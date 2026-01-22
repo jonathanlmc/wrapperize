@@ -60,10 +60,7 @@ impl Hook {
         }
     }
 
-    pub fn generate_and_write_to_disk(
-        &self,
-        paths: &wrapper::GeneratedPaths,
-    ) -> anyhow::Result<()> {
+    pub fn generate_and_write_to_disk(&self, paths: &wrapper::ExecPaths) -> anyhow::Result<()> {
         let content = match self.trigger_action {
             TriggerAction::InstallOrUpdate => generate_install_and_update(paths, &self.path),
             TriggerAction::Removal => generate_removal(paths),
@@ -104,12 +101,9 @@ fn trim_path_root(path: impl Into<PathBuf>) -> PathBuf {
 /// `hook_script_path` when the provided wrapped binary is installed or updated.
 ///
 /// Returns the generated hook string.
-pub fn generate_install_and_update(
-    paths: &wrapper::GeneratedPaths,
-    hook_script_path: &Path,
-) -> String {
+pub fn generate_install_and_update(paths: &wrapper::ExecPaths, hook_script_path: &Path) -> String {
     generate(
-        &paths.wrapped_path,
+        &paths.wrapped,
         TriggerAction::InstallOrUpdate,
         &format!("Wrapping {}...", paths.wrapped_filename),
         &hook_script_path.to_string_lossy(),
@@ -119,15 +113,15 @@ pub fn generate_install_and_update(
 // TODO: add ability to remove installed hooks as well
 /// Generate a `pacman` hook to remove all wrapper traces when the specified wrapped binary is uninstalled.
 /// Returns the generated hook string.
-pub fn generate_removal(paths: &wrapper::GeneratedPaths) -> String {
+pub fn generate_removal(paths: &wrapper::ExecPaths) -> String {
     generate(
-        &paths.wrapped_path,
+        &paths.wrapped,
         TriggerAction::Removal,
         &format!(
             "Removing traces of wrapper for {}...",
             paths.wrapped_filename
         ),
-        &format!("/usr/bin/rm {}", paths.unwrapped_path.escaped),
+        &format!("/usr/bin/rm {}", paths.unwrapped.escaped),
     )
 }
 
@@ -207,10 +201,10 @@ mod tests {
 
     #[test]
     fn test_generate_install_and_update() {
-        let paths = wrapper::GeneratedPaths {
-            wrapped_path: path::Escaped::new("/usr/bin/test_executable"),
+        let paths = wrapper::ExecPaths {
+            unwrapped: path::Escaped::new("/usr/bin/original_executable"),
+            wrapped: path::Escaped::new("/usr/bin/test_executable"),
             wrapped_filename: "test_executable".to_string(),
-            unwrapped_path: path::Escaped::new("/usr/bin/original_executable"),
         };
 
         let hook_script_path = PathBuf::from("/etc/test_script.sh");
@@ -236,10 +230,10 @@ mod tests {
 
     #[test]
     fn test_generate_removal() {
-        let bin_info = wrapper::GeneratedPaths {
-            wrapped_path: path::Escaped::new("/usr/bin/wrapped_exec"),
+        let bin_info = wrapper::ExecPaths {
+            unwrapped: path::Escaped::new("/usr/bin/original_exec"),
+            wrapped: path::Escaped::new("/usr/bin/wrapped_exec"),
             wrapped_filename: "wrapped_exec".to_string(),
-            unwrapped_path: path::Escaped::new("/usr/bin/original_exec"),
         };
 
         let result = generate_removal(&bin_info);

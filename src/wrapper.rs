@@ -11,15 +11,15 @@ use crate::{error::IoError, file, pacman_hook, path, script};
 
 pub use script::WrapperParams;
 
-pub struct GeneratedPaths {
-    pub unwrapped_path: path::Escaped,
-    pub wrapped_path: path::Escaped,
+pub struct ExecPaths {
+    pub unwrapped: path::Escaped,
+    pub wrapped: path::Escaped,
     pub wrapped_filename: String,
 }
 
-impl GeneratedPaths {
+impl ExecPaths {
     pub fn try_from_path(path: &Path) -> anyhow::Result<Self> {
-        let wrapped_path = path::Escaped::new(path);
+        let wrapped = path::Escaped::new(path);
 
         let filename = path
             .file_name()
@@ -27,12 +27,11 @@ impl GeneratedPaths {
             .to_string_lossy()
             .into_owned();
 
-        let unwrapped_path =
-            path::Escaped::new(path.with_file_name(format!(".{filename}-unwrapped")));
+        let unwrapped = path::Escaped::new(path.with_file_name(format!(".{filename}-unwrapped")));
 
         Ok(Self {
-            unwrapped_path,
-            wrapped_path,
+            unwrapped,
+            wrapped,
             wrapped_filename: filename,
         })
     }
@@ -45,7 +44,7 @@ pub enum InstallScript {
 
 impl InstallScript {
     pub fn create(
-        paths: &GeneratedPaths,
+        paths: &ExecPaths,
         wrapper_script: &str,
         save_to_disk: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
@@ -93,33 +92,29 @@ impl InstallScript {
 }
 
 pub fn create(
-    paths: &GeneratedPaths,
+    paths: &ExecPaths,
     wrapper_params: &WrapperParams,
     use_pacman_hooks: bool,
 ) -> anyhow::Result<InstallScript> {
-    let wrapper_already_exists = paths
-        .unwrapped_path
-        .original
-        .try_exists()
-        .with_context(|| {
-            IoError::new(
-                &paths.unwrapped_path.original,
-                "failed to check if wrapped path already exists",
-            )
-        })?;
+    let wrapper_already_exists = paths.unwrapped.original.try_exists().with_context(|| {
+        IoError::new(
+            &paths.unwrapped.original,
+            "failed to check if wrapped path already exists",
+        )
+    })?;
 
     if wrapper_already_exists {
         return Err(IoError::new(
-            &paths.wrapped_path.original,
+            &paths.wrapped.original,
             format!(
                 "wrapper already exists for this file at `{}`",
-                paths.unwrapped_path.original.display()
+                paths.unwrapped.original.display()
             ),
         )
         .into());
     }
 
-    let wrapper_script = script::generate_binary_wrapper(&paths.unwrapped_path, wrapper_params)
+    let wrapper_script = script::generate_binary_wrapper(&paths.unwrapped, wrapper_params)
         .context("failed to generate binary wrapper")?;
 
     // the wrapper install script uses the same path / filename as the pacman install hook but with a different

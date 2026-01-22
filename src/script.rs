@@ -72,7 +72,7 @@ pub fn generate_binary_wrapper(
 }
 
 pub fn generate_wrapper_install(
-    paths: &wrapper::GeneratedPaths,
+    paths: &wrapper::ExecPaths,
     wrapper_script: &str,
 ) -> anyhow::Result<String> {
     Ok(formatdoc! { r#"
@@ -85,8 +85,8 @@ pub fn generate_wrapper_install(
 
         chmod +x "{wrapped_path}"
         "#,
-        wrapped_path = paths.wrapped_path.escaped,
-        unwrapped_path = paths.unwrapped_path.escaped,
+        wrapped_path = paths.wrapped.escaped,
+        unwrapped_path = paths.unwrapped.escaped,
         program_name = env!("CARGO_PKG_NAME"),
     })
 }

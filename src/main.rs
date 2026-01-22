@@ -63,7 +63,7 @@ fn main() -> anyhow::Result<()> {
     let args: Args = argh::from_env();
     args.verify()?;
 
-    let wrapper_paths = wrapper::GeneratedPaths::try_from_path(&args.binary_path)?;
+    let wrapper_paths = wrapper::ExecPaths::try_from_path(&args.binary_path)?;
 
     let wrapper_params = wrapper::WrapperParams {
         args: &args.args,
@@ -76,7 +76,7 @@ fn main() -> anyhow::Result<()> {
     if wrapper_install_script_status.success() {
         println!(
             "wrapper successfully created for `{}`",
-            wrapper_paths.wrapped_path.original.display()
+            wrapper_paths.wrapped.original.display()
         );
     } else if let Some(code) = wrapper_install_script_status.code() {
         eprintln!("wrapper install script failed with code `{code}`");
