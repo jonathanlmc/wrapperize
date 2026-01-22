@@ -1,6 +1,5 @@
 use std::fmt::Write;
 
-use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
 
 use crate::{env, path, wrapper};
@@ -40,13 +39,12 @@ fn generate_binary_wrapper_content(
 ) -> anyhow::Result<String> {
     // TODO: allow arg passthrough before wrapper args
 
+    let mut wrapper = String::new();
+
     // first, add all environment variables to the wrapper
-    let mut wrapper = params
-        .env_vars
-        .iter()
-        .map(env::Variable::to_bash_export_line)
-        .collect::<anyhow::Result<String>>()
-        .context("environment variable generation failed")?;
+    for env in params.env_vars {
+        env.write_bash_line(&mut wrapper)?;
+    }
 
     // now execute the binary with the wrapper arguments
     write!(wrapper, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
@@ -136,8 +134,8 @@ mod tests {
             assert_eq!(
                 result,
                 formatdoc! { r#"
-                    export ENV1=val1
-                    export ENV2=val2
+                    export ENV1="val1"
+                    export ENV2="val2"
                     exec "/usr/bin/test_bin" "\$@""#
                 }
             );
