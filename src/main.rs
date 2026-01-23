@@ -11,16 +11,17 @@ use error::IoError;
 use std::{os::unix::process::ExitStatusExt, path::PathBuf};
 
 #[derive(FromArgs)]
-/// Wrap an executable to always execute with additional arguments or environment variables.
+/// Wrap an executable to always execute with additional arguments and/or environment variables.
 struct Args<'a> {
+    /// absolute path to the executable to wrap
     #[argh(positional)]
-    binary_path: PathBuf,
+    executable_path: PathBuf,
 
-    /// an additional argument to launch the binary with; can be used multiple times
+    /// an additional argument to launch the executable with; can be used multiple times
     #[argh(option, short = 'a', long = "arg")]
     args: Vec<String>,
 
-    /// an environment variable in the format of `ENV=value` to launch the binary with; can be used multiple times
+    /// an environment variable in the format of `ENV=value` to launch the executable with; can be used multiple times
     #[argh(option, short = 'e', long = "env")]
     envs: Vec<env::Variable<'a>>,
 
@@ -39,23 +40,25 @@ impl Args<'_> {
             anyhow::bail!("no arguments or environment variables provided to wrap");
         }
 
-        let binary_exists = self.binary_path.try_exists().with_context(|| {
+        let executable_exists = self.executable_path.try_exists().with_context(|| {
             IoError::new(
-                &self.binary_path,
+                &self.executable_path,
                 "failed to check if specified path exists",
             )
         })?;
 
-        if !binary_exists {
-            return Err(IoError::new(&self.binary_path, "path does not exist").into());
+        if !executable_exists {
+            return Err(IoError::new(&self.executable_path, "path does not exist").into());
         }
 
-        if !self.binary_path.is_file() {
-            return Err(IoError::new(&self.binary_path, "path does not point to a file").into());
+        if !self.executable_path.is_file() {
+            return Err(
+                IoError::new(&self.executable_path, "path does not point to a file").into(),
+            );
         }
 
-        if !self.binary_path.is_absolute() {
-            return Err(IoError::new(&self.binary_path, "path must be absolute").into());
+        if !self.executable_path.is_absolute() {
+            return Err(IoError::new(&self.executable_path, "path must be absolute").into());
         }
 
         Ok(())
@@ -66,7 +69,7 @@ fn main() -> anyhow::Result<()> {
     let args: Args = argh::from_env();
     args.verify()?;
 
-    let wrapper_paths = wrapper::ExecPaths::try_from_path(&args.binary_path)?;
+    let wrapper_paths = wrapper::ExecPaths::try_from_path(&args.executable_path)?;
 
     let wrapper_params = wrapper::Params {
         args: &args.args,

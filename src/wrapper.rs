@@ -203,7 +203,7 @@ pub fn create(
 }
 
 fn write_wrapper_script_content(
-    unwrapped_bin_path: &path::Escaped,
+    unwrapped_exec_path: &path::Escaped,
     params: &Params,
     mut writer: impl FmtWrite,
 ) -> fmt::Result {
@@ -212,12 +212,12 @@ fn write_wrapper_script_content(
         env.write_bash_line(&mut writer)?;
     }
 
-    // now execute the binary with the wrapper arguments
+    // now run the executable with the wrapper arguments
 
     // compile time sanity check: the escaped path should be escaping the same quote
     // character used in the `write!` call
     const _: () = assert!(path::Escaped::ESCAPE_CHAR == '"');
-    write!(writer, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
+    write!(writer, r#"exec "{}""#, unwrapped_exec_path.escaped)?;
 
     fn write_passthrough(mut writer: impl FmtWrite) -> fmt::Result {
         write!(writer, r#" "\$@""#)
@@ -243,12 +243,12 @@ fn write_wrapper_script_content(
 }
 
 fn write_full_wrapper_script(
-    unwrapped_bin_path: &path::Escaped,
+    unwrapped_exec_path: &path::Escaped,
     params: &Params,
     mut writer: impl FmtWrite,
 ) -> fmt::Result {
     writer.write_str(SCRIPT_TEMPLATE)?;
-    write_wrapper_script_content(unwrapped_bin_path, params, writer)
+    write_wrapper_script_content(unwrapped_exec_path, params, writer)
 }
 
 #[cfg(test)]

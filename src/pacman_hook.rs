@@ -107,7 +107,7 @@ fn trim_path_root(path: impl Into<PathBuf>) -> PathBuf {
 }
 
 /// Generate a `pacman` hook to execute the script at the path given by
-/// `hook_script_path` when the provided wrapped binary is installed or updated.
+/// `hook_script_path` when the provided wrapped executable is installed or updated.
 ///
 /// Returns the generated hook string.
 pub fn generate_install_and_update(paths: &wrapper::ExecPaths, hook_script_path: &Path) -> String {
@@ -119,7 +119,7 @@ pub fn generate_install_and_update(paths: &wrapper::ExecPaths, hook_script_path:
     )
 }
 
-/// Generate a `pacman` hook to remove all wrapper traces when the specified wrapped binary is uninstalled.
+/// Generate a `pacman` hook to remove all wrapper traces when the specified wrapped executable is uninstalled.
 /// Returns the generated hook string.
 pub fn generate_removal(
     paths: &wrapper::ExecPaths,
