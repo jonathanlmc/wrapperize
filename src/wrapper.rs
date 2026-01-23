@@ -237,7 +237,7 @@ fn write_wrapper_script_content(
     } else {
         write_args(params, &mut writer)?;
         write_passthrough(&mut writer)?;
-    };
+    }
 
     Ok(())
 }
