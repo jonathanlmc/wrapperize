@@ -3,7 +3,6 @@ mod error;
 mod file;
 mod pacman_hook;
 mod path;
-mod script;
 mod wrapper;
 
 use anyhow::Context;
@@ -65,7 +64,7 @@ fn main() -> anyhow::Result<()> {
 
     let wrapper_paths = wrapper::ExecPaths::try_from_path(&args.binary_path)?;
 
-    let wrapper_params = wrapper::WrapperParams {
+    let wrapper_params = wrapper::Params {
         args: &args.args,
         env_vars: &args.envs,
     };
