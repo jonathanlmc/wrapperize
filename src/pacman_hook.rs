@@ -1,10 +1,12 @@
 use std::{
+    fmt::Write,
     fs,
     path::{Path, PathBuf},
 };
 
 use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
+use strum::IntoEnumIterator;
 use tap::Tap;
 
 use crate::{error::IoError, path, wrapper};
@@ -20,29 +22,31 @@ pub fn create_dir() -> anyhow::Result<()> {
 }
 
 /// A trigger for a hook's target.
-#[derive(Copy, Clone)]
+#[derive(Debug, strum::EnumIter)]
 pub enum TriggerAction {
     /// The hook target was installed or updated.
     InstallOrUpdate,
     /// The hook target was uninstalled / removed.
-    Removal,
+    Removal {
+        wrapper_install_script_path: PathBuf,
+    },
 }
 
 impl TriggerAction {
     /// Returns the verb form of the action for use in paths.
-    fn path_verb(self) -> &'static str {
+    fn path_verb(&self) -> &'static str {
         match self {
             Self::InstallOrUpdate => "install",
-            Self::Removal => "remove",
+            Self::Removal { .. } => "remove",
         }
     }
 
-    fn operations_str(self) -> &'static str {
+    fn operations_str(&self) -> &'static str {
         match self {
             Self::InstallOrUpdate => concatdoc! { "
                 Operation = Install
                 Operation = Upgrade" },
-            Self::Removal => "Operation = Remove",
+            Self::Removal { .. } => "Operation = Remove",
         }
     }
 }
@@ -54,32 +58,37 @@ pub struct Hook {
 
 impl Hook {
     pub fn new(target_filename: &str, trigger_action: TriggerAction) -> Self {
+        let path = get_path(target_filename, &trigger_action);
+
         Self {
             trigger_action,
-            path: get_path(target_filename, trigger_action),
+            path,
         }
     }
 
-    pub fn generate_and_write_to_disk(&self, paths: &wrapper::ExecPaths) -> anyhow::Result<()> {
+    pub fn generate_and_write_to_disk(self, paths: &wrapper::ExecPaths) -> anyhow::Result<()> {
+        // `trigger_action` is moved below, so we need to get this now for error messages
+        let trigger_path_verb = self.trigger_action.path_verb();
+
         let content = match self.trigger_action {
             TriggerAction::InstallOrUpdate => generate_install_and_update(paths, &self.path),
-            TriggerAction::Removal => generate_removal(paths),
+            TriggerAction::Removal {
+                wrapper_install_script_path,
+            } => generate_removal(paths, wrapper_install_script_path)
+                .context("failed to generate content for pacman removal hook")?,
         };
 
         fs::write(&self.path, content).with_context(|| {
             IoError::new(
                 &self.path,
-                format!(
-                    "failed to write pacman {} hook",
-                    self.trigger_action.path_verb()
-                ),
+                format!("failed to write pacman {trigger_path_verb} hook",),
             )
         })
     }
 }
 
 /// Generate the full path for a `pacman` hook script.
-fn get_path(target_filename: &str, trigger_action: TriggerAction) -> PathBuf {
+fn get_path(target_filename: &str, trigger_action: &TriggerAction) -> PathBuf {
     PathBuf::from(HOOK_DIR).tap_mut(|p| {
         p.push(format!(
             "{target_filename}-{program_name}-{trigger_action}.hook",
@@ -110,19 +119,53 @@ pub fn generate_install_and_update(paths: &wrapper::ExecPaths, hook_script_path:
     )
 }
 
-// TODO: add ability to remove installed hooks as well
 /// Generate a `pacman` hook to remove all wrapper traces when the specified wrapped binary is uninstalled.
 /// Returns the generated hook string.
-pub fn generate_removal(paths: &wrapper::ExecPaths) -> String {
-    generate(
+pub fn generate_removal(
+    paths: &wrapper::ExecPaths,
+    wrapper_install_script_path: PathBuf,
+) -> anyhow::Result<String> {
+    let mut remove_cmd = String::from("/usr/bin/rm");
+
+    // add all hook target paths for the wrapped executable to the remove command
+    for action in TriggerAction::iter() {
+        let path = get_path(&paths.wrapped_filename, &action)
+            .to_string_lossy()
+            // escape double quotes, since we'll be wrapping the path in our own
+            .replace('"', "\\\"");
+
+        write!(&mut remove_cmd, r#" "{}""#, path)
+            .with_context(|| format!("failed to append path for `{action:?}` pacman hook"))?;
+    }
+
+    // also add the wrapper install script for removal
+    write!(
+        &mut remove_cmd,
+        r#" "{}""#,
+        wrapper_install_script_path
+            .to_string_lossy()
+            // escape double quotes since we're wrapping it with our own
+            .replace('"', "\\\"")
+    )
+    .context("failed to append wrapper install script path")?;
+
+    // include the unwrapped executable path since it isn't managed by pacman
+    write!(&mut remove_cmd, r#" "{}""#, paths.unwrapped.escaped)
+        .context("failed to append unwrapped executable path")?;
+
+    let hook = generate(
         &paths.wrapped,
-        TriggerAction::Removal,
+        TriggerAction::Removal {
+            wrapper_install_script_path,
+        },
         &format!(
             "Removing traces of wrapper for {}...",
             paths.wrapped_filename
         ),
-        &format!("/usr/bin/rm {}", paths.unwrapped.escaped),
-    )
+        &remove_cmd,
+    );
+
+    Ok(hook)
 }
 
 fn generate(
@@ -176,7 +219,7 @@ mod tests {
 
         fn test_get_hook_path_helper(
             target_filename: &str,
-            trigger_action: TriggerAction,
+            trigger_action: &TriggerAction,
             expected_suffix: &str,
         ) {
             let expected_program_name = env!("CARGO_PKG_NAME");
@@ -188,14 +231,20 @@ mod tests {
             assert_eq!(result.to_string_lossy(), expected_path);
         }
 
+        fn gen_remove_trigger() -> TriggerAction {
+            TriggerAction::Removal {
+                wrapper_install_script_path: PathBuf::from("/wrapper/install/path"),
+            }
+        }
+
         #[test]
         fn test_install_or_update() {
-            test_get_hook_path_helper("test_binary", TriggerAction::InstallOrUpdate, "install");
+            test_get_hook_path_helper("test_binary", &TriggerAction::InstallOrUpdate, "install");
         }
 
         #[test]
         fn test_removal() {
-            test_get_hook_path_helper("test_binary", TriggerAction::Removal, "remove");
+            test_get_hook_path_helper("test_binary", &gen_remove_trigger(), "remove");
         }
     }
 
@@ -236,7 +285,8 @@ mod tests {
             wrapped_filename: "wrapped_exec".to_string(),
         };
 
-        let result = generate_removal(&bin_info);
+        let result = generate_removal(&bin_info, PathBuf::from("install/script"))
+            .expect("expected generation to succeed");
 
         let expected = formatdoc! { r#"
               [Trigger]
@@ -247,7 +297,7 @@ mod tests {
               [Action]
               Description = Removing traces of wrapper for wrapped_exec...
               When = PostTransaction
-              Exec = /usr/bin/rm /usr/bin/original_exec
+              Exec = /usr/bin/rm "/etc/pacman.d/hooks/wrapped_exec-wrapperize-install.hook" "/etc/pacman.d/hooks/wrapped_exec-wrapperize-remove.hook" "install/script" "/usr/bin/original_exec"
               "#
         };
 

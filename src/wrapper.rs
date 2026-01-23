@@ -1,7 +1,7 @@
 use std::{
     fmt::{self, Display, Write as FmtWrite},
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     process::{self, Command, Stdio},
 };
 
@@ -50,16 +50,16 @@ impl InstallScript {
     pub fn create(
         paths: &ExecPaths,
         wrapper_script: impl Display,
-        save_to_disk: Option<PathBuf>,
+        save_to_disk: Option<&Path>,
     ) -> anyhow::Result<Self> {
         let wrapper_install_script = Self::generate_script(paths, wrapper_script)
             .context("failed to generate wrapper install script")?;
 
         if let Some(path) = save_to_disk {
-            file::write_with_execute_bit(&path, wrapper_install_script.as_bytes()).with_context(
+            file::write_with_execute_bit(path, wrapper_install_script.as_bytes()).with_context(
                 || {
                     IoError::new(
-                        &path,
+                        path,
                         "failed to write wrapper install script for pacman hook",
                     )
                 },
@@ -172,12 +172,18 @@ pub fn create(
         })
     });
 
-    let wrapper_install_script =
-        InstallScript::create(paths, wrapper_script_fmt, wrapper_install_script_path)?;
+    let wrapper_install_script = InstallScript::create(
+        paths,
+        wrapper_script_fmt,
+        wrapper_install_script_path.as_deref(),
+    )?;
 
-    if !use_pacman_hooks {
+    // the install script path is only present if we're using pacman hooks, so we
+    // can use it to determine if we should skip the hook setup, and unwrap the
+    // path value at the same time for later use
+    let Some(wrapper_install_script_path) = wrapper_install_script_path else {
         return Ok(wrapper_install_script);
-    }
+    };
 
     // since we are using pacman hooks, generate their contents and write them all to disk now
 
@@ -185,8 +191,13 @@ pub fn create(
 
     pacman_install_hook.generate_and_write_to_disk(paths)?;
 
-    pacman_hook::Hook::new(&paths.wrapped_filename, pacman_hook::TriggerAction::Removal)
-        .generate_and_write_to_disk(paths)?;
+    pacman_hook::Hook::new(
+        &paths.wrapped_filename,
+        pacman_hook::TriggerAction::Removal {
+            wrapper_install_script_path,
+        },
+    )
+    .generate_and_write_to_disk(paths)?;
 
     Ok(wrapper_install_script)
 }
