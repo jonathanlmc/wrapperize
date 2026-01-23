@@ -27,6 +27,10 @@ struct Args<'a> {
     /// do not generate hooks for pacman; intended to be used for paths not managed by pacman (such as `/home`)
     #[argh(switch, long = "nohooks")]
     skip_pacman_hooks: bool,
+
+    /// place the wrapper arguments after the passthrough arguments, so they are seen last by the wrapped executable
+    #[argh(switch, long = "passthrough-args-first")]
+    add_passthrough_args_first: bool,
 }
 
 impl Args<'_> {
@@ -66,6 +70,7 @@ fn main() -> anyhow::Result<()> {
 
     let wrapper_params = wrapper::Params {
         args: &args.args,
+        add_passthrough_args_first: args.add_passthrough_args_first,
         env_vars: &args.envs,
     };
 

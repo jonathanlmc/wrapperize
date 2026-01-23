@@ -108,6 +108,7 @@ impl InstallScript {
 #[derive(Default)]
 pub struct Params<'a> {
     pub args: &'a [String],
+    pub add_passthrough_args_first: bool,
     pub env_vars: &'a [env::Variable<'a>],
 }
 
@@ -195,8 +196,6 @@ fn write_wrapper_script_content(
     params: &Params,
     mut writer: impl FmtWrite,
 ) -> fmt::Result {
-    // TODO: allow arg passthrough before wrapper args
-
     // first, add all environment variables to the wrapper
     for env in params.env_vars {
         env.write_bash_line(&mut writer)?;
@@ -209,12 +208,25 @@ fn write_wrapper_script_content(
     const _: () = assert!(path::Escaped::ESCAPE_CHAR == '"');
     write!(writer, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
 
-    for arg in params.args {
-        write!(writer, " {}", arg)?;
+    fn write_passthrough(mut writer: impl FmtWrite) -> fmt::Result {
+        write!(writer, r#" "\$@""#)
     }
 
-    // passthrough all other arguments
-    write!(writer, r#" "\$@""#)?;
+    fn write_args(params: &Params, mut writer: impl FmtWrite) -> fmt::Result {
+        for arg in params.args {
+            write!(writer, " {}", arg)?;
+        }
+
+        Ok(())
+    }
+
+    if params.add_passthrough_args_first {
+        write_passthrough(&mut writer)?;
+        write_args(params, &mut writer)?;
+    } else {
+        write_args(params, &mut writer)?;
+        write_passthrough(&mut writer)?;
+    };
 
     Ok(())
 }
@@ -288,6 +300,28 @@ mod tests {
                     export ENV1="val1"
                     export ENV2="val2"
                     exec "/usr/bin/test_bin" "\$@""#
+                }
+            );
+        }
+
+        #[test]
+        fn passthrough_args_first() {
+            let path = path::Escaped::new("/usr/bin/test_bin");
+
+            let result = gen_script_content(
+                &path,
+                &Params {
+                    args: &[String::from("--arg1"), String::from("--arg2")],
+                    add_passthrough_args_first: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+            assert_eq!(
+                result,
+                formatdoc! { r#"
+                    exec "/usr/bin/test_bin" "\$@" --arg1 --arg2"#
                 }
             );
         }
