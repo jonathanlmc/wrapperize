@@ -1,0 +1,42 @@
+name: Rust
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy, rustfmt
+
+      - name: Check
+        run: cargo check
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: Release binary
+          path: target/release/wrapperize
+          retention-days: 90
+          overwrite: true
