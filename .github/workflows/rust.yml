@@ -36,7 +36,7 @@ jobs:
       - name: Upload release artifact
         uses: actions/upload-artifact@v6
         with:
-          name: Release binary
+          name: Release binary (Linux)
           path: target/release/wrapperize
           retention-days: 90
           overwrite: true
