@@ -1,5 +1,5 @@
 use std::{
-    fmt::Write as FmtWrite,
+    fmt::{self, Display, Write as FmtWrite},
     io::Write,
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
@@ -49,7 +49,7 @@ pub struct InstallScript {
 impl InstallScript {
     pub fn create(
         paths: &ExecPaths,
-        wrapper_script: &str,
+        wrapper_script: impl Display,
         save_to_disk: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         let wrapper_install_script = Self::generate_script(paths, wrapper_script)
@@ -87,7 +87,7 @@ impl InstallScript {
         cmd.wait().map_err(Into::into)
     }
 
-    fn generate_script(paths: &ExecPaths, wrapper_script: &str) -> anyhow::Result<String> {
+    fn generate_script(paths: &ExecPaths, wrapper_script: impl Display) -> anyhow::Result<String> {
         Ok(formatdoc! { r#"
             {SCRIPT_TEMPLATE}
             mv "{wrapped_path}" "{unwrapped_path}"
@@ -152,8 +152,8 @@ pub fn create(
         .into());
     }
 
-    let wrapper_script = generate_full_wrapper_script(&paths.unwrapped, wrapper_params)
-        .context("failed to generate binary wrapper")?;
+    let wrapper_script_fmt =
+        fmt::from_fn(|writer| write_full_wrapper_script(&paths.unwrapped, wrapper_params, writer));
 
     // the wrapper install script uses the same path / filename as the pacman install hook but with a different
     // extension, so we can initialize the pacman install hook now to simply clone and alter its pre-computed path
@@ -172,7 +172,7 @@ pub fn create(
     });
 
     let wrapper_install_script =
-        InstallScript::create(paths, &wrapper_script, wrapper_install_script_path)?;
+        InstallScript::create(paths, wrapper_script_fmt, wrapper_install_script_path)?;
 
     if !use_pacman_hooks {
         return Ok(wrapper_install_script);
@@ -190,17 +190,16 @@ pub fn create(
     Ok(wrapper_install_script)
 }
 
-fn generate_wrapper_script_content(
+fn write_wrapper_script_content(
     unwrapped_bin_path: &path::Escaped,
     params: &Params,
-) -> anyhow::Result<String> {
+    mut writer: impl FmtWrite,
+) -> fmt::Result {
     // TODO: allow arg passthrough before wrapper args
-
-    let mut wrapper = String::new();
 
     // first, add all environment variables to the wrapper
     for env in params.env_vars {
-        env.write_bash_line(&mut wrapper)?;
+        env.write_bash_line(&mut writer)?;
     }
 
     // now execute the binary with the wrapper arguments
@@ -208,24 +207,25 @@ fn generate_wrapper_script_content(
     // compile time sanity check: the escaped path should be escaping the same quote
     // character used in the `write!` call
     const _: () = assert!(path::Escaped::ESCAPE_CHAR == '"');
-    write!(wrapper, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
+    write!(writer, r#"exec "{}""#, unwrapped_bin_path.escaped)?;
 
     for arg in params.args {
-        write!(wrapper, " {}", arg)?;
+        write!(writer, " {}", arg)?;
     }
 
     // passthrough all other arguments
-    write!(wrapper, r#" "\$@""#)?;
+    write!(writer, r#" "\$@""#)?;
 
-    Ok(wrapper)
+    Ok(())
 }
 
-fn generate_full_wrapper_script(
+fn write_full_wrapper_script(
     unwrapped_bin_path: &path::Escaped,
     params: &Params,
-) -> anyhow::Result<String> {
-    let content = generate_wrapper_script_content(unwrapped_bin_path, params)?;
-    Ok(format!("{SCRIPT_TEMPLATE}{content}"))
+    mut writer: impl FmtWrite,
+) -> fmt::Result {
+    writer.write_str(SCRIPT_TEMPLATE)?;
+    write_wrapper_script_content(unwrapped_bin_path, params, writer)
 }
 
 #[cfg(test)]
@@ -235,24 +235,30 @@ mod tests {
     mod generate_wrapper_script {
         use super::*;
 
+        fn gen_script_content(path: &path::Escaped, params: &Params) -> anyhow::Result<String> {
+            let mut buffer = String::new();
+            write_wrapper_script_content(path, params, &mut buffer)?;
+            Ok(buffer)
+        }
+
         #[test]
         fn no_args() {
             let path = path::Escaped::new("test_bin");
-            let result = generate_wrapper_script_content(&path, &Params::default()).unwrap();
+            let result = gen_script_content(&path, &Params::default()).unwrap();
             assert_eq!(result, r#"exec "test_bin" "\$@""#);
         }
 
         #[test]
         fn path_with_space() {
             let path = path::Escaped::new("/usr/bin/test bin");
-            let result = generate_wrapper_script_content(&path, &Params::default()).unwrap();
+            let result = gen_script_content(&path, &Params::default()).unwrap();
             assert_eq!(result, r#"exec "/usr/bin/test bin" "\$@""#);
         }
 
         #[test]
         fn path_with_quote() {
             let path = path::Escaped::new("/usr/bin/\"test\"");
-            let result = generate_wrapper_script_content(&path, &Params::default()).unwrap();
+            let result = gen_script_content(&path, &Params::default()).unwrap();
             assert_eq!(result, r#"exec "/usr/bin/\"test\"" "\$@""#);
         }
 
@@ -260,7 +266,7 @@ mod tests {
         fn with_args() {
             let path = path::Escaped::new("/usr/bin/test_bin");
             let args = &[String::from("--arg1"), String::from("--arg2")];
-            let result = generate_wrapper_script_content(&path, &Params::with_args(args)).unwrap();
+            let result = gen_script_content(&path, &Params::with_args(args)).unwrap();
 
             assert_eq!(result, r#"exec "/usr/bin/test_bin" --arg1 --arg2 "\$@""#);
         }
@@ -274,8 +280,7 @@ mod tests {
                 env::Variable::new("ENV2", "val2"),
             ];
 
-            let result =
-                generate_wrapper_script_content(&path, &Params::with_env_vars(env_vars)).unwrap();
+            let result = gen_script_content(&path, &Params::with_env_vars(env_vars)).unwrap();
 
             assert_eq!(
                 result,
