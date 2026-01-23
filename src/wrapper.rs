@@ -37,9 +37,8 @@ impl ExecPaths {
     }
 }
 
-pub enum InstallScript {
-    Saved(PathBuf),
-    MemoryOnly(String),
+pub struct InstallScript {
+    contents: String,
 }
 
 impl InstallScript {
@@ -51,43 +50,36 @@ impl InstallScript {
         let wrapper_install_script = script::generate_wrapper_install(paths, wrapper_script)
             .context("failed to generate wrapper install script")?;
 
-        let Some(path) = save_to_disk else {
-            return Ok(Self::MemoryOnly(wrapper_install_script));
-        };
+        if let Some(path) = save_to_disk {
+            file::write_with_execute_bit(&path, wrapper_install_script.as_bytes()).with_context(
+                || {
+                    IoError::new(
+                        &path,
+                        "failed to write wrapper install script for pacman hook",
+                    )
+                },
+            )?;
+        }
 
-        file::write_with_execute_bit(&path, wrapper_install_script.as_bytes()).with_context(
-            || {
-                IoError::new(
-                    &path,
-                    "failed to write wrapper install script for pacman hook",
-                )
-            },
-        )?;
-
-        Ok(Self::Saved(path))
+        Ok(Self {
+            contents: wrapper_install_script,
+        })
     }
 
     pub fn execute(self) -> anyhow::Result<process::ExitStatus> {
-        match self {
-            Self::MemoryOnly(script) => {
-                let mut cmd = Command::new("/usr/bin/env")
-                    .arg("bash")
-                    .stdin(Stdio::piped())
-                    .spawn()
-                    .context("failed to spawn bash to execute wrapper installer")?;
+        let mut cmd = Command::new("/usr/bin/env")
+            .arg("bash")
+            .stdin(Stdio::piped())
+            .spawn()
+            .context("failed to spawn bash to execute wrapper installer")?;
 
-                cmd.stdin
-                    .take()
-                    .context("no stdin configured for bash")?
-                    .write_all(script.as_bytes())
-                    .context("failed to pipe wrapper install script to bash")?;
+        cmd.stdin
+            .take()
+            .context("no stdin configured for bash")?
+            .write_all(self.contents.as_bytes())
+            .context("failed to pipe wrapper install script to bash")?;
 
-                cmd.wait().map_err(Into::into)
-            }
-            Self::Saved(path) => Command::new(&path)
-                .status()
-                .with_context(|| IoError::new(path, "failed to execute wrapper install script")),
-        }
+        cmd.wait().map_err(Into::into)
     }
 }
 
