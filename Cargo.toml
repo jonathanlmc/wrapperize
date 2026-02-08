@@ -11,7 +11,7 @@ strip = true
 
 [dependencies]
 anyhow = "1.0.101"
-argh = "0.1.13"
+argh = "0.1.14"
 indoc = "2.0.7"
 strum = { version = "0.27.2", features = ["derive"] }
 tap = "1.0.1"
