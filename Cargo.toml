@@ -10,7 +10,7 @@ lto = true
 strip = true
 
 [dependencies]
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 argh = "0.1.14"
 indoc = "2.0.7"
 strum = { version = "0.27.2", features = ["derive"] }
