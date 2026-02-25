@@ -5,10 +5,11 @@ mod pacman_hook;
 mod path;
 mod wrapper;
 
-use anyhow::Context;
 use argh::FromArgs;
-use error::IoError;
+use color_eyre::eyre::{self, Context, eyre};
 use std::{os::unix::process::ExitStatusExt, path::PathBuf};
+
+use crate::error::ReportExt;
 
 #[derive(FromArgs)]
 /// Wrap an executable to always execute with additional arguments and/or environment variables.
@@ -35,37 +36,39 @@ struct Args<'a> {
 }
 
 impl Args<'_> {
-    fn verify(&self) -> anyhow::Result<()> {
+    fn verify(&self) -> eyre::Result<()> {
         if self.args.is_empty() && self.envs.is_empty() {
-            anyhow::bail!("no arguments or environment variables provided to wrap");
+            eyre::bail!("no arguments or environment variables provided to wrap");
         }
 
-        let executable_exists = self.executable_path.try_exists().with_context(|| {
-            IoError::new(
-                &self.executable_path,
-                "failed to check if specified path exists",
-            )
-        })?;
+        let executable_exists = self
+            .executable_path
+            .try_exists()
+            .wrap_err("failed to check if specified path exists")
+            .with_path_section(&self.executable_path)?;
 
         if !executable_exists {
-            return Err(IoError::new(&self.executable_path, "path does not exist").into());
+            return Err(eyre!("path does not exist")).with_path_section(&self.executable_path);
         }
 
         if !self.executable_path.is_file() {
-            return Err(
-                IoError::new(&self.executable_path, "path does not point to a file").into(),
-            );
+            return Err(eyre!("path does not point to a file"))
+                .with_path_section(&self.executable_path);
         }
 
         if !self.executable_path.is_absolute() {
-            return Err(IoError::new(&self.executable_path, "path must be absolute").into());
+            return Err(eyre!("path must be absolute")).with_path_section(&self.executable_path);
         }
 
         Ok(())
     }
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> eyre::Result<()> {
+    color_eyre::config::HookBuilder::default()
+        .display_env_section(false)
+        .install()?;
+
     let args: Args = argh::from_env();
     args.verify()?;
 

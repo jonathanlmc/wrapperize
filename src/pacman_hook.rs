@@ -4,21 +4,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Context;
+use color_eyre::eyre::{self, Context};
 use indoc::{concatdoc, formatdoc};
 use strum::IntoEnumIterator;
 use tap::Tap;
 
-use crate::{error::IoError, path, wrapper};
+use crate::{error::ReportExt, path, wrapper};
 
 /// Points to the user `pacman` hook directory.
 pub const HOOK_DIR: &str = "/etc/pacman.d/hooks";
 
 /// Create the user `pacman` hook directory if it doesn't exist.
 /// Returns an error if the directory couldn't be created (likely due to permissions).
-pub fn create_dir() -> anyhow::Result<()> {
+pub fn create_dir() -> eyre::Result<()> {
     fs::create_dir_all(HOOK_DIR)
-        .with_context(|| format!("failed to create pacman user hook directory at `{HOOK_DIR}`"))
+        .wrap_err_with(|| format!("failed to create pacman user hook directory at `{HOOK_DIR}`"))
 }
 
 /// A trigger for a hook's target.
@@ -66,7 +66,7 @@ impl Hook {
         }
     }
 
-    pub fn generate_and_write_to_disk(self, paths: &wrapper::ExecPaths) -> anyhow::Result<()> {
+    pub fn generate_and_write_to_disk(self, paths: &wrapper::ExecPaths) -> eyre::Result<()> {
         // `trigger_action` is moved below, so we need to get this now for error messages
         let trigger_path_verb = self.trigger_action.path_verb();
 
@@ -75,15 +75,12 @@ impl Hook {
             TriggerAction::Removal {
                 wrapper_install_script_path,
             } => generate_removal(paths, wrapper_install_script_path)
-                .context("failed to generate content for pacman removal hook")?,
+                .wrap_err("failed to generate content for pacman removal hook")?,
         };
 
-        fs::write(&self.path, content).with_context(|| {
-            IoError::new(
-                &self.path,
-                format!("failed to write pacman {trigger_path_verb} hook",),
-            )
-        })
+        fs::write(&self.path, content)
+            .wrap_err_with(|| format!("failed to write pacman {trigger_path_verb} hook"))
+            .with_path_section(&self.path)
     }
 }
 
@@ -124,7 +121,7 @@ pub fn generate_install_and_update(paths: &wrapper::ExecPaths, hook_script_path:
 pub fn generate_removal(
     paths: &wrapper::ExecPaths,
     wrapper_install_script_path: PathBuf,
-) -> anyhow::Result<String> {
+) -> eyre::Result<String> {
     let mut remove_cmd = String::from("/usr/bin/rm");
 
     // add all hook target paths for the wrapped executable to the remove command
@@ -147,11 +144,11 @@ pub fn generate_removal(
             // escape double quotes since we're wrapping it with our own
             .replace('"', "\\\"")
     )
-    .context("failed to append wrapper install script path")?;
+    .wrap_err("failed to append wrapper install script path")?;
 
     // include the unwrapped executable path since it isn't managed by pacman
     write!(&mut remove_cmd, r#" "{}""#, paths.unwrapped.escaped)
-        .context("failed to append unwrapped executable path")?;
+        .wrap_err("failed to append unwrapped executable path")?;
 
     let hook = generate(
         &paths.wrapped,

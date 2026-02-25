@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt, str::FromStr};
 
-use anyhow::Context;
+use color_eyre::eyre::{self, eyre};
 
 #[derive(Debug, PartialEq)]
 pub struct Variable<'a> {
@@ -17,10 +17,12 @@ impl<'a> Variable<'a> {
         }
     }
 
-    pub fn parse<'b>(value: &'b str) -> anyhow::Result<Variable<'b>> {
-        let (name, value) = value.split_once('=').context("missing '=' separator")?;
+    pub fn parse<'b>(value: &'b str) -> eyre::Result<Variable<'b>> {
+        let (name, value) = value
+            .split_once('=')
+            .ok_or_else(|| eyre!("missing '=' separator"))?;
 
-        anyhow::ensure!(
+        eyre::ensure!(
             Self::is_valid_name(name),
             "invalid name for environment variable `{name}`",
         );
@@ -73,7 +75,7 @@ impl<'a> Variable<'a> {
 }
 
 impl<'a> TryFrom<&'a str> for Variable<'a> {
-    type Error = anyhow::Error;
+    type Error = eyre::Report;
 
     fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         Self::parse(s)
@@ -81,7 +83,7 @@ impl<'a> TryFrom<&'a str> for Variable<'a> {
 }
 
 impl FromStr for Variable<'_> {
-    type Err = anyhow::Error;
+    type Err = eyre::Report;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s).map(|env| env.into_owned())

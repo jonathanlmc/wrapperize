@@ -5,10 +5,10 @@ use std::{
     process::{self, Command, Stdio},
 };
 
-use anyhow::Context;
+use color_eyre::eyre::{self, Context, eyre};
 use indoc::{concatdoc, formatdoc};
 
-use crate::{env, error::IoError, file, pacman_hook, path};
+use crate::{env, error::ReportExt, file, pacman_hook, path};
 
 const SCRIPT_TEMPLATE: &str = concatdoc! {"
     #!/usr/bin/env bash
@@ -22,12 +22,12 @@ pub struct ExecPaths {
 }
 
 impl ExecPaths {
-    pub fn try_from_path(path: &Path) -> anyhow::Result<Self> {
+    pub fn try_from_path(path: &Path) -> eyre::Result<Self> {
         let wrapped = path::Escaped::new(path);
 
         let filename = path
             .file_name()
-            .context("invalid path provided")?
+            .ok_or_else(|| eyre!("invalid path provided"))?
             .to_string_lossy()
             .into_owned();
 
@@ -50,19 +50,14 @@ impl InstallScript {
         paths: &ExecPaths,
         wrapper_script: impl Display,
         save_to_disk: Option<&Path>,
-    ) -> anyhow::Result<Self> {
+    ) -> eyre::Result<Self> {
         let wrapper_install_script = Self::generate_script(paths, wrapper_script)
-            .context("failed to generate wrapper install script")?;
+            .wrap_err("failed to generate wrapper install script")?;
 
         if let Some(path) = save_to_disk {
-            file::write_with_execute_bit(path, wrapper_install_script.as_bytes()).with_context(
-                || {
-                    IoError::new(
-                        path,
-                        "failed to write wrapper install script for pacman hook",
-                    )
-                },
-            )?;
+            file::write_with_execute_bit(path, wrapper_install_script.as_bytes())
+                .wrap_err("failed to write wrapper install script for pacman hook")
+                .with_path_section(path)?;
         }
 
         Ok(Self {
@@ -70,23 +65,23 @@ impl InstallScript {
         })
     }
 
-    pub fn execute(self) -> anyhow::Result<process::ExitStatus> {
+    pub fn execute(self) -> eyre::Result<process::ExitStatus> {
         let mut cmd = Command::new("/usr/bin/env")
             .arg("bash")
             .stdin(Stdio::piped())
             .spawn()
-            .context("failed to spawn bash to execute wrapper installer")?;
+            .wrap_err("failed to spawn bash to execute wrapper installer")?;
 
         cmd.stdin
             .take()
-            .context("no stdin configured for bash")?
+            .ok_or_else(|| eyre!("no stdin configured for bash"))?
             .write_all(self.contents.as_bytes())
-            .context("failed to pipe wrapper install script to bash")?;
+            .wrap_err("failed to pipe wrapper install script to bash")?;
 
         cmd.wait().map_err(Into::into)
     }
 
-    fn generate_script(paths: &ExecPaths, wrapper_script: impl Display) -> anyhow::Result<String> {
+    fn generate_script(paths: &ExecPaths, wrapper_script: impl Display) -> eyre::Result<String> {
         Ok(formatdoc! { r#"
             {SCRIPT_TEMPLATE}
             mv "{wrapped_path}" "{unwrapped_path}"
@@ -133,23 +128,16 @@ pub fn create(
     paths: &ExecPaths,
     wrapper_params: &Params,
     use_pacman_hooks: bool,
-) -> anyhow::Result<InstallScript> {
-    let wrapper_already_exists = paths.unwrapped.original.try_exists().with_context(|| {
-        IoError::new(
-            &paths.unwrapped.original,
-            "failed to check if wrapped path already exists",
-        )
-    })?;
+) -> eyre::Result<InstallScript> {
+    let wrapper_already_exists = paths
+        .unwrapped
+        .original
+        .try_exists()
+        .wrap_err("failed to check if wrapped path already exists")
+        .with_path_section(&paths.unwrapped.original)?;
 
     if wrapper_already_exists {
-        return Err(IoError::new(
-            &paths.wrapped.original,
-            format!(
-                "wrapper already exists for this file at `{}`",
-                paths.unwrapped.original.display()
-            ),
-        )
-        .into());
+        return Err(eyre!("wrapper already exists")).with_path_section(&paths.unwrapped.original);
     }
 
     let wrapper_script_fmt =
@@ -254,7 +242,7 @@ mod tests {
     mod generate_wrapper_script {
         use super::*;
 
-        fn gen_script_content(path: &path::Escaped, params: &Params) -> anyhow::Result<String> {
+        fn gen_script_content(path: &path::Escaped, params: &Params) -> eyre::Result<String> {
             let mut buffer = String::new();
             write_wrapper_script_content(path, params, &mut buffer)?;
             Ok(buffer)

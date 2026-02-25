@@ -1,39 +1,13 @@
-use std::path::PathBuf;
+use std::path::Path;
 
-use anyhow::anyhow;
+use color_eyre::{Section, SectionExt, eyre};
 
-#[derive(Debug, thiserror::Error)]
-#[error("{path}: {err}")]
-pub struct IoError {
-    path: PathBuf,
-    err: anyhow::Error,
+pub trait ReportExt {
+    fn with_path_section(self, path: &Path) -> Self;
 }
 
-impl IoError {
-    pub fn new(path: impl Into<PathBuf>, err: impl Into<IoErrorMessage>) -> Self {
-        Self {
-            path: path.into(),
-            err: err.into().0,
-        }
-    }
-}
-
-pub struct IoErrorMessage(anyhow::Error);
-
-impl From<anyhow::Error> for IoErrorMessage {
-    fn from(value: anyhow::Error) -> Self {
-        Self(value)
-    }
-}
-
-impl From<&'static str> for IoErrorMessage {
-    fn from(value: &'static str) -> Self {
-        Self(anyhow!(value))
-    }
-}
-
-impl From<String> for IoErrorMessage {
-    fn from(value: String) -> Self {
-        Self(anyhow!(value))
+impl<T> ReportExt for eyre::Result<T> {
+    fn with_path_section(self, path: &Path) -> Self {
+        self.with_section(|| path.display().to_string().header("Path:"))
     }
 }
