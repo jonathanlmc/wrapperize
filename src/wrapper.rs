@@ -7,7 +7,6 @@ use std::{
 
 use anyhow::Context;
 use indoc::{concatdoc, formatdoc};
-use tap::Tap;
 
 use crate::{env, error::IoError, file, pacman_hook, path};
 
@@ -166,11 +165,8 @@ pub fn create(
 
     // the wrapper install script only needs a path if it's going to be saved to disk,
     // and we only need to write it to disk if we're generating pacman hooks
-    let wrapper_install_script_path = use_pacman_hooks.then(|| {
-        pacman_install_hook.path.clone().tap_mut(|p| {
-            p.set_extension("sh");
-        })
-    });
+    let wrapper_install_script_path =
+        use_pacman_hooks.then(|| pacman_install_hook.path.with_extension("sh"));
 
     let wrapper_install_script = InstallScript::create(
         paths,
