@@ -29,20 +29,25 @@ cargo install --path wrapperize
 
 ```text
 $ wrapperize --help
-Wrap an executable to always execute with additional arguments or environment variables.
+Usage: wrapperize [-a <arg...>] [-e <env...>] [--nohooks] [--passthrough-args-first] [--keep-relative] [--] <executable_path>
 
-Usage: wrapperize <executable_path> [options]
-
-Arguments:
-  <executable_path>      Absolute path to the executable to wrap
+Positional Arguments:
+  executable_path   path of the executable to wrap
 
 Options:
-  -a, --arg <ARG>    An additional argument to launch the executable with. Can be used multiple times.
-  -e, --env <ENV>    An environment variable in the format of `ENV=value`. Can be used multiple times.
-  --nohooks          Do not generate pacman hooks.
+  -a, --arg         an additional argument to launch the executable with; can be
+                    used multiple times
+  -e, --env         an environment variable in the format of `ENV=value` to
+                    launch the executable with; can be used multiple times
+  --nohooks         do not generate hooks for pacman; intended to be used for
+                    paths not managed by pacman (such as `/home`)
   --passthrough-args-first
-                     Place the wrapper arguments after the passthrough arguments, so they are seen last by the wrapped executable.
-  -h, --help         Print help information
+                    place the wrapper arguments after the passthrough arguments,
+                    so they are seen last by the wrapped executable
+  --keep-relative   prevent the provided path from being canonicalized (made
+                    absolute); this can only be used in combination with
+                    `--nohooks` to minimize the chance of a path-related attack
+  --help, help      display usage information
 ```
 
 # Examples

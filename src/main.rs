@@ -14,7 +14,7 @@ use crate::error::ReportExt;
 #[derive(FromArgs)]
 /// Wrap an executable to always execute with additional arguments and/or environment variables.
 struct Args<'a> {
-    /// absolute path to the executable to wrap
+    /// path of the executable to wrap
     #[argh(positional)]
     executable_path: PathBuf,
 
@@ -33,12 +33,33 @@ struct Args<'a> {
     /// place the wrapper arguments after the passthrough arguments, so they are seen last by the wrapped executable
     #[argh(switch, long = "passthrough-args-first")]
     add_passthrough_args_first: bool,
+
+    /// prevent the provided path from being canonicalized (made absolute); this
+    /// can only be used in combination with `--nohooks` to minimize the chance
+    /// of a path-related attack
+    #[argh(switch, long = "keep-relative")]
+    keep_relative_path: bool,
 }
 
 impl Args<'_> {
-    fn verify(&self) -> eyre::Result<()> {
+    fn process(&mut self) -> eyre::Result<()> {
         if self.args.is_empty() && self.envs.is_empty() {
             eyre::bail!("no arguments or environment variables provided to wrap");
+        }
+
+        match self.keep_relative_path {
+            true => {
+                if !self.skip_pacman_hooks {
+                    eyre::bail!("relative paths can only be used with the `--nohooks` flag")
+                }
+
+                // nothing else to do; the given path can be relative or absolute
+            }
+            false => {
+                self.executable_path = std::fs::canonicalize(&self.executable_path)
+                    .wrap_err("failed to canonicalize path")
+                    .with_path_section(&self.executable_path)?;
+            }
         }
 
         let executable_exists = self
@@ -56,10 +77,6 @@ impl Args<'_> {
                 .with_path_section(&self.executable_path);
         }
 
-        if !self.executable_path.is_absolute() {
-            return Err(eyre!("path must be absolute")).with_path_section(&self.executable_path);
-        }
-
         Ok(())
     }
 }
@@ -69,8 +86,11 @@ fn main() -> eyre::Result<()> {
         .display_env_section(false)
         .install()?;
 
-    let args: Args = argh::from_env();
-    args.verify()?;
+    let args = {
+        let mut args: Args = argh::from_env();
+        args.process()?;
+        args
+    };
 
     let wrapper_paths = wrapper::ExecPaths::try_from_path(&args.executable_path)?;
 
